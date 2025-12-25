@@ -2,8 +2,8 @@ name: Build and Release Talos Unified Images
 
 on:
   push:
-    # branches:
-    #   - 'renovate/**'
+    branches:
+      - 'renovate/siderolabs-talos-*'
 
 jobs:
   build-and-release:
@@ -14,7 +14,7 @@ jobs:
       TALOS_VERSION: v1.12.0
     steps:
       - name: Checkout repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
       - name: Set up build tools
         run: |
@@ -42,18 +42,25 @@ jobs:
           echo "✓ Both artifacts verified:"
           ls -lh incus-*.tar.gz
 
+      - name: Calculate SHA256 hashes
+        id: hashes
+        run: |
+          AMD64_HASH=$(sha256sum incus-amd64.tar.gz | cut -d' ' -f1)
+          ARM64_HASH=$(sha256sum incus-arm64.tar.gz | cut -d' ' -f1)
+          echo "amd64_hash=${AMD64_HASH}" >> $GITHUB_OUTPUT
+          echo "arm64_hash=${ARM64_HASH}" >> $GITHUB_OUTPUT
+          echo "✓ Hashes calculated:"
+          echo "  AMD64: ${AMD64_HASH}"
+          echo "  ARM64: ${ARM64_HASH}"
+
       - name: Import GPG key
-        id: gpg_setup
-        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
         run: |
           echo "${{ secrets.GPG_PRIVATE_KEY }}" | base64 -d | gpg --batch --import
           gpg --list-secret-keys --keyid-format LONG
-          echo "signing_enabled=true" >> $GITHUB_OUTPUT
         env:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
 
       - name: Sign artifacts
-        if: steps.gpg_setup.outputs.signing_enabled == 'true'
         run: |
           GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format LONG | grep '^sec' | awk '{print $2}' | cut -d'/' -f2 | head -1)
           echo "Signing with key: ${GPG_KEY_ID}"
@@ -74,16 +81,63 @@ jobs:
         env:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
 
+      - name: Look up KV namespace ID by name
+        id: kv_namespace
+        run: |
+          # Look up namespace by name (same as deploy workflow)
+          NAMESPACE_NAME="windsorcli-dev-images"
+          NAMESPACE_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/storage/kv/namespaces" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" | \
+            python3 -c "import sys, json; data=json.load(sys.stdin); ns=[n for n in data.get('result', []) if n.get('title') == '$NAMESPACE_NAME']; print(ns[0]['id'] if ns else '')" || echo "")
+          
+          if [ -z "$NAMESPACE_ID" ]; then
+            echo "Error: KV namespace '$NAMESPACE_NAME' not found"
+            echo "Please ensure the namespace exists in Cloudflare Dashboard"
+            exit 1
+          fi
+          
+          echo "namespace_id=$NAMESPACE_ID" >> $GITHUB_OUTPUT
+          echo "✓ Found KV namespace '$NAMESPACE_NAME' with ID: $NAMESPACE_ID"
+
+      - name: Upload hashes to Cloudflare KV
+        run: |
+          # Upload hashes to KV store
+          # Key format: {repo}:{version}:{arch}
+          # Example: talos-incus:v1.12.0:amd64
+          REPO="talos-incus"
+          
+          # Trim whitespace and verify hash format (64 hex chars)
+          AMD64_HASH=$(echo "${{ steps.hashes.outputs.amd64_hash }}" | tr -d '[:space:]')
+          ARM64_HASH=$(echo "${{ steps.hashes.outputs.arm64_hash }}" | tr -d '[:space:]')
+          
+          if [ ${#AMD64_HASH} -ne 64 ] || [ ${#ARM64_HASH} -ne 64 ]; then
+            echo "Error: Invalid hash length (expected 64 hex characters)"
+            echo "AMD64 hash length: ${#AMD64_HASH}"
+            echo "ARM64 hash length: ${#ARM64_HASH}"
+            exit 1
+          fi
+          
+          echo "Uploading hashes to KV:"
+          echo "  AMD64: ${AMD64_HASH}"
+          echo "  ARM64: ${ARM64_HASH}"
+          
+          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/storage/kv/namespaces/${{ steps.kv_namespace.outputs.namespace_id }}/values/${REPO}:${TALOS_VERSION}:amd64" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: text/plain" \
+            --data "${AMD64_HASH}"
+          
+          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/storage/kv/namespaces/${{ steps.kv_namespace.outputs.namespace_id }}/values/${REPO}:${TALOS_VERSION}:arm64" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: text/plain" \
+            --data "${ARM64_HASH}"
+          
+          echo "✓ Hashes uploaded to Cloudflare KV"
+
       - name: Create GitHub Release
         run: |
           # Build file list for release
-          RELEASE_FILES=("incus-amd64.tar.gz" "incus-arm64.tar.gz")
-          if [ -f "incus-amd64.tar.gz.asc" ]; then
-            RELEASE_FILES+=("incus-amd64.tar.gz.asc")
-          fi
-          if [ -f "incus-arm64.tar.gz.asc" ]; then
-            RELEASE_FILES+=("incus-arm64.tar.gz.asc")
-          fi
+          RELEASE_FILES=("incus-amd64.tar.gz" "incus-arm64.tar.gz" "incus-amd64.tar.gz.asc" "incus-arm64.tar.gz.asc")
           
           NOTES="Automated release of Talos OS unified images for Incus.
           
@@ -97,29 +151,25 @@ jobs:
           
           **AMD64:**
           \`\`\`bash
-          incus image import https://github.com/${{ github.repository }}/releases/download/${TALOS_VERSION}/incus-amd64.tar.gz --alias talos-${TALOS_VERSION}-amd64
+          incus image import https://images.windsorcli.dev/talos-incus/${TALOS_VERSION}/incus-amd64.tar.gz --alias talos-${TALOS_VERSION}-amd64
           incus launch talos-${TALOS_VERSION}-amd64 my-talos-instance
           \`\`\`
           
           **ARM64:**
           \`\`\`bash
-          incus image import https://github.com/${{ github.repository }}/releases/download/${TALOS_VERSION}/incus-arm64.tar.gz --alias talos-${TALOS_VERSION}-arm64
+          incus image import https://images.windsorcli.dev/talos-incus/${TALOS_VERSION}/incus-arm64.tar.gz --alias talos-${TALOS_VERSION}-arm64
           incus launch talos-${TALOS_VERSION}-arm64 my-talos-instance
-          \`\`\`"
-          
-          if [ -f "incus-amd64.tar.gz.asc" ]; then
-            NOTES="${NOTES}
+          \`\`\`
           
           **Verification:**
           \`\`\`bash
           gpg --verify incus-amd64.tar.gz.asc incus-amd64.tar.gz
           gpg --verify incus-arm64.tar.gz.asc incus-arm64.tar.gz
           \`\`\`"
-          fi
           
           gh release create "${TALOS_VERSION}" \
             --title "Talos ${TALOS_VERSION}" \
             --notes "${NOTES}" \
             "${RELEASE_FILES[@]}"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}

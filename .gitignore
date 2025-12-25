@@ -22,3 +22,7 @@ Thumbs.db
 *.tmp
 *.log
 
+# Cloudflare
+.wrangler/
+wrangler.toml
+

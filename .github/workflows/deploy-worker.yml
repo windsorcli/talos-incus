@@ -1,0 +1,73 @@
+name: Deploy Cloudflare Worker
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'cloudflare-worker.js'
+      - 'wrangler.toml.template'
+      - '.github/workflows/deploy-worker.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Look up KV namespace ID by name
+        id: kv_namespace
+        run: |
+          NAMESPACE_NAME="windsorcli-dev-images"
+          
+          # Use Cloudflare API directly (more reliable than wrangler in CI)
+          RESPONSE=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/storage/kv/namespaces" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json")
+          
+          # Check if API call succeeded
+          if echo "$RESPONSE" | jq -e '.success == false' >/dev/null 2>&1; then
+            echo "Error: Cloudflare API request failed"
+            echo "$RESPONSE" | jq .
+            exit 1
+          fi
+          
+          # Extract namespace ID by name
+          NAMESPACE_ID=$(echo "$RESPONSE" | jq -r --arg name "$NAMESPACE_NAME" '.result[] | select(.title == $name) | .id' || echo "")
+          
+          if [ -z "$NAMESPACE_ID" ] || [ "$NAMESPACE_ID" = "null" ]; then
+            echo "Error: KV namespace '$NAMESPACE_NAME' not found"
+            echo ""
+            echo "Available namespaces:"
+            echo "$RESPONSE" | jq -r '.result[] | "  - \(.title) (ID: \(.id))"'
+            echo ""
+            echo "Please create the namespace in Cloudflare Dashboard:"
+            echo "  Workers & Pages → KV → Create a namespace"
+            echo "  Name it: $NAMESPACE_NAME"
+            exit 1
+          fi
+          
+          echo "✓ Found KV namespace '$NAMESPACE_NAME' with ID: $NAMESPACE_ID"
+          echo "namespace_id=$NAMESPACE_ID" >> $GITHUB_OUTPUT
+
+      - name: Generate wrangler.toml with namespace ID
+        run: |
+          # Generate wrangler.toml from template with namespace ID (not committed)
+          if [ ! -f wrangler.toml.template ]; then
+            echo "Error: wrangler.toml.template not found"
+            exit 1
+          fi
+          
+          NAMESPACE_ID="${{ steps.kv_namespace.outputs.namespace_id }}"
+          sed "s/id = \".*\"/id = \"$NAMESPACE_ID\"/" wrangler.toml.template > wrangler.toml
+          
+          echo "Generated wrangler.toml (not committed to repo):"
+          cat wrangler.toml
+
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@da0e0dfe58b7a431659754fdf3f186c529afbe65 # v3.14.1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

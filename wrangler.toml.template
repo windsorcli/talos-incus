@@ -1,0 +1,16 @@
+name = "images-windsorcli"
+main = "cloudflare-worker.js"
+compatibility_date = "2024-01-01"
+
+# Route to custom domain (avoids needing workers.dev subdomain)
+routes = [
+  { pattern = "images.windsorcli.dev/*", zone_name = "windsorcli.dev" }
+]
+
+[vars]
+
+[[kv_namespaces]]
+binding = "IMAGE_HASHES"
+# Namespace name: windsorcli-dev-images
+# ID will be auto-populated by deploy workflow
+id = ""

@@ -1,4 +1,30 @@
 {
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard"
+  ],
+  "packageRules": [
+    {
+      "description": "Pin GitHub Actions to specific commit SHAs",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "versioning": "github-tags",
+      "pinDigests": true,
+      "enabled": true,
+      "automerge": false,
+      "labels": [
+        "dependencies"
+      ]
+    },
+    {
+      "matchPackageNames": ["siderolabs/talos"],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash"
+    }
+  ],
   "customManagers": [
     {
       "customType": "regex",
@@ -12,14 +38,19 @@
       "datasourceTemplate": "github-tags",
       "packageNameTemplate": "siderolabs/talos",
       "versioningTemplate": "semver"
-    }
-  ],
-  "packageRules": [
+    },
     {
-      "matchPackageNames": ["siderolabs/talos"],
-      "automerge": true,
-      "automergeType": "pr",
-      "automergeStrategy": "squash"
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.*\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "npm install -g wrangler@(?<currentValue>[\\d\\.]+)"
+      ],
+      "depNameTemplate": "wrangler",
+      "datasourceTemplate": "npm",
+      "packageNameTemplate": "wrangler",
+      "versioningTemplate": "npm"
     }
   ],
   "platformAutomerge": true
