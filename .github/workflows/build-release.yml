@@ -1,0 +1,125 @@
+name: Build and Release Talos Unified Images
+
+on:
+  push:
+    # branches:
+    #   - 'renovate/**'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TALOS_VERSION: v1.12.0
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+
+      - name: Set up build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd qemu-utils tar gzip curl gnupg
+
+      - name: Build unified images
+        run: |
+          chmod +x scripts/build-image.sh
+          echo "Building amd64 image..."
+          ./scripts/build-image.sh "${TALOS_VERSION}" amd64
+          echo "Building arm64 image..."
+          ./scripts/build-image.sh "${TALOS_VERSION}" arm64
+
+      - name: Verify artifacts
+        run: |
+          if [ ! -f "incus-amd64.tar.gz" ]; then
+            echo "Error: incus-amd64.tar.gz not found"
+            exit 1
+          fi
+          if [ ! -f "incus-arm64.tar.gz" ]; then
+            echo "Error: incus-arm64.tar.gz not found"
+            exit 1
+          fi
+          echo "✓ Both artifacts verified:"
+          ls -lh incus-*.tar.gz
+
+      - name: Import GPG key
+        id: gpg_setup
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | base64 -d | gpg --batch --import
+          gpg --list-secret-keys --keyid-format LONG
+          echo "signing_enabled=true" >> $GITHUB_OUTPUT
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Sign artifacts
+        if: steps.gpg_setup.outputs.signing_enabled == 'true'
+        run: |
+          GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format LONG | grep '^sec' | awk '{print $2}' | cut -d'/' -f2 | head -1)
+          echo "Signing with key: ${GPG_KEY_ID}"
+          gpg --batch --yes --detach-sign --armor \
+            --pinentry-mode loopback \
+            --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
+            -u "${GPG_KEY_ID}" \
+            -o incus-amd64.tar.gz.asc \
+            incus-amd64.tar.gz
+          gpg --batch --yes --detach-sign --armor \
+            --pinentry-mode loopback \
+            --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
+            -u "${GPG_KEY_ID}" \
+            -o incus-arm64.tar.gz.asc \
+            incus-arm64.tar.gz
+          echo "✓ Signatures created:"
+          ls -lh *.asc
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Create GitHub Release
+        run: |
+          # Build file list for release
+          RELEASE_FILES=("incus-amd64.tar.gz" "incus-arm64.tar.gz")
+          if [ -f "incus-amd64.tar.gz.asc" ]; then
+            RELEASE_FILES+=("incus-amd64.tar.gz.asc")
+          fi
+          if [ -f "incus-arm64.tar.gz.asc" ]; then
+            RELEASE_FILES+=("incus-arm64.tar.gz.asc")
+          fi
+          
+          NOTES="Automated release of Talos OS unified images for Incus.
+          
+          **Version:** ${TALOS_VERSION}
+          
+          **Architectures:**
+          - amd64 (x86_64)
+          - arm64 (aarch64)
+          
+          **Usage:**
+          
+          **AMD64:**
+          \`\`\`bash
+          incus image import https://github.com/${{ github.repository }}/releases/download/${TALOS_VERSION}/incus-amd64.tar.gz --alias talos-${TALOS_VERSION}-amd64
+          incus launch talos-${TALOS_VERSION}-amd64 my-talos-instance
+          \`\`\`
+          
+          **ARM64:**
+          \`\`\`bash
+          incus image import https://github.com/${{ github.repository }}/releases/download/${TALOS_VERSION}/incus-arm64.tar.gz --alias talos-${TALOS_VERSION}-arm64
+          incus launch talos-${TALOS_VERSION}-arm64 my-talos-instance
+          \`\`\`"
+          
+          if [ -f "incus-amd64.tar.gz.asc" ]; then
+            NOTES="${NOTES}
+          
+          **Verification:**
+          \`\`\`bash
+          gpg --verify incus-amd64.tar.gz.asc incus-amd64.tar.gz
+          gpg --verify incus-arm64.tar.gz.asc incus-arm64.tar.gz
+          \`\`\`"
+          fi
+          
+          gh release create "${TALOS_VERSION}" \
+            --title "Talos ${TALOS_VERSION}" \
+            --notes "${NOTES}" \
+            "${RELEASE_FILES[@]}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

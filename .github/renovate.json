@@ -1,0 +1,27 @@
+{
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.*\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "env:\\s*\\n\\s+TALOS_VERSION:\\s*(?<currentValue>v[\\d\\.]+)"
+      ],
+      "depNameTemplate": "siderolabs/talos",
+      "datasourceTemplate": "github-tags",
+      "packageNameTemplate": "siderolabs/talos",
+      "versioningTemplate": "semver"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchPackageNames": ["siderolabs/talos"],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash"
+    }
+  ],
+  "platformAutomerge": true
+}
+

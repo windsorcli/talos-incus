@@ -1,0 +1,24 @@
+# Build artifacts
+*.tar.gz
+*.raw
+*.raw.zst
+*.qcow2
+*.img
+build/
+dist/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.log
+
