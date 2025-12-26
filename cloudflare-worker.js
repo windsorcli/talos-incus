@@ -73,7 +73,7 @@ async function getAllImageMetadata(env) {
           images[simplestreamsKey] = {
             aliases: `talos/${version}/${arch}/${variant},talos/${version}/${arch}`,
             arch: arch,
-            os: 'Talos',  // Capitalized like official images (Almalinux, Ubuntu, etc.)
+            os: 'Talos',
             release: version,
             release_title: version,
             requirements: {},
