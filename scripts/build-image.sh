@@ -7,7 +7,7 @@ ARCH="${2:-amd64}"
 BASE_URL="https://github.com/siderolabs/talos/releases/download/${VERSION}"
 WORK_DIR="$(pwd)/build-${ARCH}"
 RAW_FILE="${WORK_DIR}/metal-${ARCH}.raw.zst"
-OUTPUT_FILE="incus-${ARCH}.tar.gz"
+OUTPUT_FILE="incus-${ARCH}.tar.xz"
 
 echo "Creating unified Talos image for ${ARCH} (${VERSION})..."
 
@@ -50,10 +50,10 @@ echo "Step 5: Preparing rootfs.img..."
 ROOTFS_FILE="${WORK_DIR}/rootfs.img"
 cp "${QCOW2_FILE}" "${ROOTFS_FILE}"
 
-# Step 6: Create unified tarball
+# Step 6: Create unified tarball (using xz compression for Incus simplestreams compatibility)
 echo "Step 6: Creating unified tarball..."
 cd "${WORK_DIR}"
-tar -czf "../${OUTPUT_FILE}" "metadata.yaml" "rootfs.img"
+tar -cJf "../${OUTPUT_FILE}" "metadata.yaml" "rootfs.img"
 
 # Cleanup
 cd ..

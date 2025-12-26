@@ -94,20 +94,20 @@ async function getAllImageMetadata(env) {
         
         // Path is relative to the simplestreams base URL
         // Incus will construct the full URL: {baseUrl}/{path}
-        const imagePath = `talos-incus/${version}/incus-${arch}.tar.gz`;
+        const imagePath = `talos-incus/${version}/incus-${arch}.tar.xz`;
         
         images[simplestreamsKey].versions[versionKey] = {
           items: {
-            'incus.tar.gz': {
-              ftype: 'incus.tar.gz',
+            'incus.tar.xz': {
+              ftype: 'incus.tar.xz',
               sha256: metadata.hash,
               size: metadata.size,
               path: imagePath,
               combined_sha256: metadata.hash,
               combined_rootxz_sha256: metadata.hash
             },
-            'lxd.tar.gz': {
-              ftype: 'lxd.tar.gz',
+            'lxd.tar.xz': {
+              ftype: 'lxd.tar.xz',
               sha256: metadata.hash,
               size: metadata.size,
               path: imagePath,
@@ -214,9 +214,10 @@ async function handleImageDownload(request, env, pathMatch) {
   const [, repo, version, filename] = pathMatch;
   
   // Extract architecture from filename and normalize
-  const archMatch = filename.match(/([a-z0-9_]+)\.tar\.gz$/);
+  // Support both .tar.gz and .tar.xz for backward compatibility
+  const archMatch = filename.match(/([a-z0-9_]+)\.tar\.(gz|xz)$/);
   if (!archMatch) {
-    return new Response('Invalid filename format. Expected: *.tar.gz', { 
+    return new Response('Invalid filename format. Expected: *.tar.gz or *.tar.xz', { 
       status: 400,
       headers: { 'Content-Type': 'text/plain' }
     });

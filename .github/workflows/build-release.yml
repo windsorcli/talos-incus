@@ -31,24 +31,24 @@ jobs:
 
       - name: Verify artifacts
         run: |
-          if [ ! -f "incus-amd64.tar.gz" ]; then
-            echo "Error: incus-amd64.tar.gz not found"
+          if [ ! -f "incus-amd64.tar.xz" ]; then
+            echo "Error: incus-amd64.tar.xz not found"
             exit 1
           fi
-          if [ ! -f "incus-arm64.tar.gz" ]; then
-            echo "Error: incus-arm64.tar.gz not found"
+          if [ ! -f "incus-arm64.tar.xz" ]; then
+            echo "Error: incus-arm64.tar.xz not found"
             exit 1
           fi
           echo "✓ Both artifacts verified:"
-          ls -lh incus-*.tar.gz
+          ls -lh incus-*.tar.xz
 
       - name: Calculate SHA256 hashes and sizes
         id: hashes
         run: |
-          AMD64_HASH=$(sha256sum incus-amd64.tar.gz | cut -d' ' -f1)
-          ARM64_HASH=$(sha256sum incus-arm64.tar.gz | cut -d' ' -f1)
-          AMD64_SIZE=$(stat -c%s incus-amd64.tar.gz)
-          ARM64_SIZE=$(stat -c%s incus-arm64.tar.gz)
+          AMD64_HASH=$(sha256sum incus-amd64.tar.xz | cut -d' ' -f1)
+          ARM64_HASH=$(sha256sum incus-arm64.tar.xz | cut -d' ' -f1)
+          AMD64_SIZE=$(stat -c%s incus-amd64.tar.xz)
+          ARM64_SIZE=$(stat -c%s incus-arm64.tar.xz)
           CREATION_DATE=$(date +%s)
           
           echo "amd64_hash=${AMD64_HASH}" >> $GITHUB_OUTPUT
@@ -60,6 +60,28 @@ jobs:
           echo "✓ Hashes and sizes calculated:"
           echo "  AMD64: ${AMD64_HASH} (${AMD64_SIZE} bytes)"
           echo "  ARM64: ${ARM64_HASH} (${ARM64_SIZE} bytes)"
+      
+      - name: Verify artifacts exist and match hashes
+        run: |
+          # Recalculate hashes from files to verify they match
+          AMD64_VERIFY_HASH=$(sha256sum incus-amd64.tar.xz | cut -d' ' -f1)
+          ARM64_VERIFY_HASH=$(sha256sum incus-arm64.tar.xz | cut -d' ' -f1)
+          
+          if [ "${AMD64_VERIFY_HASH}" != "${{ steps.hashes.outputs.amd64_hash }}" ]; then
+            echo "Error: AMD64 hash mismatch!"
+            echo "  Calculated: ${{ steps.hashes.outputs.amd64_hash }}"
+            echo "  Verified: ${AMD64_VERIFY_HASH}"
+            exit 1
+          fi
+          
+          if [ "${ARM64_VERIFY_HASH}" != "${{ steps.hashes.outputs.arm64_hash }}" ]; then
+            echo "Error: ARM64 hash mismatch!"
+            echo "  Calculated: ${{ steps.hashes.outputs.arm64_hash }}"
+            echo "  Verified: ${ARM64_VERIFY_HASH}"
+            exit 1
+          fi
+          
+          echo "✓ Hash verification passed for both architectures"
 
       - name: Import GPG key
         run: |
@@ -76,14 +98,14 @@ jobs:
             --pinentry-mode loopback \
             --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
             -u "${GPG_KEY_ID}" \
-            -o incus-amd64.tar.gz.asc \
-            incus-amd64.tar.gz
+            -o incus-amd64.tar.xz.asc \
+            incus-amd64.tar.xz
           gpg --batch --yes --detach-sign --armor \
             --pinentry-mode loopback \
             --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
             -u "${GPG_KEY_ID}" \
-            -o incus-arm64.tar.gz.asc \
-            incus-arm64.tar.gz
+            -o incus-arm64.tar.xz.asc \
+            incus-arm64.tar.xz
           echo "✓ Signatures created:"
           ls -lh *.asc
         env:
@@ -210,38 +232,38 @@ jobs:
           
           echo "✓ Metadata uploaded to Cloudflare KV"
 
-      - name: Create GitHub Release
-        run: |
-          # Build file list for release
-          RELEASE_FILES=("incus-amd64.tar.gz" "incus-arm64.tar.gz" "incus-amd64.tar.gz.asc" "incus-arm64.tar.gz.asc")
-          
-          NOTES="Automated release of Talos OS unified images for Incus.
-          
-          **Version:** ${TALOS_VERSION}
-          
-          **Architectures:**
-          - amd64 (x86_64)
-          - arm64 (aarch64)
-          
-          **Usage:**
-          
-          **AMD64:**
-          \`\`\`bash
-          incus image import https://images.windsorcli.dev/talos-incus/${TALOS_VERSION}/incus-amd64.tar.gz --alias talos-${TALOS_VERSION}-amd64
-          incus launch talos-${TALOS_VERSION}-amd64 my-talos-instance
-          \`\`\`
-          
-          **ARM64:**
-          \`\`\`bash
-          incus image import https://images.windsorcli.dev/talos-incus/${TALOS_VERSION}/incus-arm64.tar.gz --alias talos-${TALOS_VERSION}-arm64
-          incus launch talos-${TALOS_VERSION}-arm64 my-talos-instance
-          \`\`\`
-          
-          **Verification:**
-          \`\`\`bash
-          gpg --verify incus-amd64.tar.gz.asc incus-amd64.tar.gz
-          gpg --verify incus-arm64.tar.gz.asc incus-arm64.tar.gz
-          \`\`\`"
+          - name: Create GitHub Release
+            run: |
+              # Build file list for release
+              RELEASE_FILES=("incus-amd64.tar.xz" "incus-arm64.tar.xz" "incus-amd64.tar.xz.asc" "incus-arm64.tar.xz.asc")
+              
+              NOTES="Automated release of Talos OS unified images for Incus.
+              
+              **Version:** ${TALOS_VERSION}
+              
+              **Architectures:**
+              - amd64 (x86_64)
+              - arm64 (aarch64)
+              
+              **Usage:**
+              
+              **AMD64:**
+              \`\`\`bash
+              incus image import https://images.windsorcli.dev/talos-incus/${TALOS_VERSION}/incus-amd64.tar.xz --alias talos-${TALOS_VERSION}-amd64
+              incus launch talos-${TALOS_VERSION}-amd64 my-talos-instance
+              \`\`\`
+              
+              **ARM64:**
+              \`\`\`bash
+              incus image import https://images.windsorcli.dev/talos-incus/${TALOS_VERSION}/incus-arm64.tar.xz --alias talos-${TALOS_VERSION}-arm64
+              incus launch talos-${TALOS_VERSION}-arm64 my-talos-instance
+              \`\`\`
+              
+              **Verification:**
+              \`\`\`bash
+              gpg --verify incus-amd64.tar.xz.asc incus-amd64.tar.xz
+              gpg --verify incus-arm64.tar.xz.asc incus-arm64.tar.xz
+              \`\`\`"
           
           gh release create "${TALOS_VERSION}" \
             --title "Talos ${TALOS_VERSION}" \

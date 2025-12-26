@@ -6,11 +6,15 @@ Automatically builds and releases unified Incus images from Talos OS releases.
 
 ```bash
 # Import and launch from images.windsorcli.dev (recommended)
-incus image import https://images.windsorcli.dev/talos-incus/v1.12.0/incus-amd64.tar.gz --alias talos-v1.12.0-amd64
+incus image import https://images.windsorcli.dev/talos-incus/v1.12.0/incus-amd64.tar.xz --alias talos-v1.12.0-amd64
 incus launch talos-v1.12.0-amd64 my-instance
 
 # Or launch directly from URL
-incus launch https://images.windsorcli.dev/talos-incus/v1.12.0/incus-amd64.tar.gz my-instance
+incus launch https://images.windsorcli.dev/talos-incus/v1.12.0/incus-amd64.tar.xz my-instance
+
+# Or use simplestreams remote (after adding: incus remote add talos https://images.windsorcli.dev --protocol simplestreams)
+incus image list talos:
+incus launch talos:talos/v1.12.0/amd64 my-instance
 ```
 
 ## How It Works
@@ -51,6 +55,6 @@ Releases are signed with GPG for verification.
 
 3. Verify:
    ```bash
-   gpg --verify incus-amd64.tar.gz.asc incus-amd64.tar.gz
-   gpg --verify incus-arm64.tar.gz.asc incus-arm64.tar.gz
+   gpg --verify incus-amd64.tar.xz.asc incus-amd64.tar.xz
+   gpg --verify incus-arm64.tar.xz.asc incus-arm64.tar.xz
    ```

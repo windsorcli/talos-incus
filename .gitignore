@@ -1,5 +1,6 @@
 # Build artifacts
 *.tar.gz
+*.tar.xz
 *.raw
 *.raw.zst
 *.qcow2
