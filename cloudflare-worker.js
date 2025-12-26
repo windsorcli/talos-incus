@@ -73,7 +73,7 @@ async function getAllImageMetadata(env) {
           images[simplestreamsKey] = {
             aliases: `talos/${version}/${arch}/${variant},talos/${version}/${arch}`,
             arch: arch,
-            os: 'Talos',
+            os: 'Talos',  // Capitalized like official images (Almalinux, Ubuntu, etc.)
             release: version,
             release_title: version,
             requirements: {},
@@ -92,13 +92,17 @@ async function getAllImageMetadata(env) {
         const minutes = String(date.getUTCMinutes()).padStart(2, '0');
         const versionKey = `${year}${month}${day}_${hours}:${minutes}`;
         
+        // Path is relative to the simplestreams base URL
+        // Incus will construct the full URL: {baseUrl}/{path}
+        const imagePath = `talos-incus/${version}/incus-${arch}.tar.gz`;
+        
         images[simplestreamsKey].versions[versionKey] = {
           items: {
             'incus.tar.gz': {
               ftype: 'incus.tar.gz',
               sha256: metadata.hash,
               size: metadata.size,
-              path: `talos-incus/${version}/incus-${arch}.tar.gz`,
+              path: imagePath,
               combined_sha256: metadata.hash,
               combined_rootxz_sha256: metadata.hash
             },
@@ -106,7 +110,7 @@ async function getAllImageMetadata(env) {
               ftype: 'lxd.tar.gz',
               sha256: metadata.hash,
               size: metadata.size,
-              path: `talos-incus/${version}/incus-${arch}.tar.gz`,
+              path: imagePath,
               combined_sha256: metadata.hash,
               combined_rootxz_sha256: metadata.hash
             }
@@ -176,6 +180,7 @@ async function handleIndex(env) {
  * This includes full product information, version entries, and file metadata
  * (hashes, sizes, paths) for each image.
  * 
+ * @param {Request} request - The incoming HTTP request (used to construct absolute URLs)
  * @param {Object} env - Cloudflare Worker environment with IMAGE_HASHES KV binding
  * @returns {Promise<Response>} JSON response with products structure
  */
@@ -312,14 +317,14 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     
-    // Simplestream endpoints
-    if (url.pathname === '/streams/v1/index.json') {
-      return handleIndex(env);
-    }
-    
-    if (url.pathname === '/streams/v1/images.json') {
-      return handleImages(env);
-    }
+        // Simplestream endpoints
+        if (url.pathname === '/streams/v1/index.json') {
+          return handleIndex(env);
+        }
+        
+        if (url.pathname === '/streams/v1/images.json') {
+          return handleImages(env);
+        }
     
     // Direct image download (backward compatible)
     const pathMatch = url.pathname.match(/^\/([^\/]+)\/(v[\d.]+)\/(.+)$/);
