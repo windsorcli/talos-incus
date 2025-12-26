@@ -1,10 +1,11 @@
 # Build artifacts
 *.tar.gz
+*.tar.xz
 *.raw
 *.raw.zst
 *.qcow2
 *.img
-build/
+build-*/
 dist/
 
 # OS files

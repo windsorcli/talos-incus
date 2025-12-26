@@ -1,16 +1,23 @@
-# Talos OS Unified Images for Incus
+# Talos OS Images for Incus
 
-Automatically builds and releases unified Incus images from Talos OS releases.
+This repository automatically converts [Talos OS](https://www.talos.dev/) disk images into Incus-compatible virtual machine images. Talos is a minimal, immutable Linux distribution designed for Kubernetes, but its official releases don't include Incus/LXD-compatible formats.
+
+## What This Repository Does
+
+This repository sets up a simplestreams server that distributes Talos OS images for Incus. It automatically converts Talos releases into Incus-compatible VM images, signs them with GPG, and serves them via a Cloudflare Worker at `images.windsorcli.dev`. When Talos releases a new version, this repo automatically builds and publishes the Incus-compatible images.
 
 ## Usage
 
 ```bash
-# Import and launch from images.windsorcli.dev (recommended)
-incus image import https://images.windsorcli.dev/talos-incus/v1.12.0/incus-amd64.tar.gz --alias talos-v1.12.0-amd64
-incus launch talos-v1.12.0-amd64 my-instance
+# Use simplestreams remote (recommended)
+incus remote add windsor https://images.windsorcli.dev --protocol simplestreams
+incus image list windsor:
+incus launch windsor:talos/v1.12.0/amd64 my-instance
 
-# Or launch directly from URL
-incus launch https://images.windsorcli.dev/talos-incus/v1.12.0/incus-amd64.tar.gz my-instance
+# Or import split format files directly from GitHub releases
+# Note: You need both the metadata and disk files
+incus image import talos-amd64-incus.tar.xz talos-amd64.qcow2 --alias talos-v1.12.0-amd64
+incus launch talos-v1.12.0-amd64 my-instance
 ```
 
 ## How It Works
@@ -18,8 +25,8 @@ incus launch https://images.windsorcli.dev/talos-incus/v1.12.0/incus-amd64.tar.g
 This repository automatically builds Incus images directly from [Talos OS releases](https://github.com/siderolabs/talos). When a new Talos version is released, Renovate automatically updates the version and triggers a build that:
 
 - Downloads the official Talos disk images from `siderolabs/talos`
-- Converts them to the unified Incus format
-- Signs them with GPG
+- Converts them to split-format Incus images (metadata + disk files)
+- Signs all files with GPG
 - Releases them here
 
 ### Cloudflare Worker Proxy
@@ -49,8 +56,14 @@ Releases are signed with GPG for verification.
 
 2. Download the signature file from the release (`.asc` file)
 
-3. Verify:
+3. Verify metadata files:
    ```bash
-   gpg --verify incus-amd64.tar.gz.asc incus-amd64.tar.gz
-   gpg --verify incus-arm64.tar.gz.asc incus-arm64.tar.gz
+   gpg --verify talos-amd64-incus.tar.xz.asc talos-amd64-incus.tar.xz
+   gpg --verify talos-arm64-incus.tar.xz.asc talos-arm64-incus.tar.xz
+   ```
+
+4. Verify disk files:
+   ```bash
+   gpg --verify talos-amd64.qcow2.asc talos-amd64.qcow2
+   gpg --verify talos-arm64.qcow2.asc talos-arm64.qcow2
    ```
