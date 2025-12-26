@@ -191,26 +191,32 @@ jobs:
           # Update products list (lightweight array of product keys, just strings)
           # This list is small - each entry is just a string like "product:talos:v1.12.0:amd64:default"
           PRODUCTS_RESPONSE=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/products:list" \
-            -H "Authorization: Bearer ${API_TOKEN}")
+            -H "Authorization: Bearer ${API_TOKEN}" \
+            -H "Content-Type: application/json" 2>&1) || true
           
-          # Check if API call succeeded
-          if ! echo "${PRODUCTS_RESPONSE}" | jq -e '.success == true' >/dev/null 2>&1; then
-            echo "Warning: Failed to fetch products list from KV, using empty array"
-            EXISTING_PRODUCTS="[]"
+          # Initialize with empty array as default
+          EXISTING_PRODUCTS="[]"
+          
+          # Check if we got a valid response
+          if [ -z "${PRODUCTS_RESPONSE}" ]; then
+            echo "Note: products:list key doesn't exist yet (first run), starting with empty array"
+          elif ! echo "${PRODUCTS_RESPONSE}" | jq -e '.success == true' >/dev/null 2>&1; then
+            echo "Warning: Failed to parse products list response, using empty array"
+            echo "  Response: ${PRODUCTS_RESPONSE:0:200}..."
           else
             # Extract the result field (KV stores JSON as a string, so result is a JSON string)
             # If result is null or missing, default to empty array
-            RESULT_VALUE=$(echo "${PRODUCTS_RESPONSE}" | jq -r '.result // "[]"')
+            RESULT_VALUE=$(echo "${PRODUCTS_RESPONSE}" | jq -r '.result // "[]"' 2>/dev/null || echo "[]")
             
             # If result is the literal string "null", treat as empty
-            if [ "${RESULT_VALUE}" = "null" ]; then
+            if [ "${RESULT_VALUE}" = "null" ] || [ -z "${RESULT_VALUE}" ]; then
               EXISTING_PRODUCTS="[]"
             else
               EXISTING_PRODUCTS="${RESULT_VALUE}"
             fi
           fi
           
-          # Validate it's a valid JSON array
+          # Validate it's a valid JSON array (always succeeds, defaults to empty array if invalid)
           if ! echo "${EXISTING_PRODUCTS}" | jq -e 'type == "array"' >/dev/null 2>&1; then
             echo "Warning: Invalid products list format, resetting to empty array"
             echo "  Received: ${EXISTING_PRODUCTS:0:100}..."
@@ -220,15 +226,31 @@ jobs:
           # Add new products if not already present (idempotent)
           # Product keys format: product:talos:{version}:{arch}:{variant}
           UPDATED_PRODUCTS=$(echo "${EXISTING_PRODUCTS}" | jq --arg p1 "${PRODUCT_AMD64}" --arg p2 "${PRODUCT_ARM64}" \
-            'if index($p1) == null then . + [$p1] else . end | if index($p2) == null then . + [$p2] else . end')
+            'if index($p1) == null then . + [$p1] else . end | if index($p2) == null then . + [$p2] else . end' 2>/dev/null || echo "[]")
+          
+          # Validate the updated products list is valid JSON
+          if ! echo "${UPDATED_PRODUCTS}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+            echo "Error: Failed to generate valid products list"
+            echo "  EXISTING_PRODUCTS: ${EXISTING_PRODUCTS}"
+            echo "  UPDATED_PRODUCTS: ${UPDATED_PRODUCTS}"
+            exit 1
+          fi
           
           echo "Products list updated:"
           echo "${UPDATED_PRODUCTS}" | jq '. | length' | xargs echo "  Total products:"
           
-          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/products:list" \
+          # Upload the updated products list
+          PUT_RESPONSE=$(curl -s -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/products:list" \
             -H "Authorization: Bearer ${API_TOKEN}" \
             -H "Content-Type: application/json" \
-            --data "${UPDATED_PRODUCTS}"
+            --data "${UPDATED_PRODUCTS}")
+          
+          # Verify the upload succeeded
+          if ! echo "${PUT_RESPONSE}" | jq -e '.success == true' >/dev/null 2>&1; then
+            echo "Error: Failed to upload products list to KV"
+            echo "  Response: ${PUT_RESPONSE}"
+            exit 1
+          fi
           
           echo "✓ Metadata uploaded to Cloudflare KV"
 
