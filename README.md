@@ -12,7 +12,7 @@ incus launch windsor:talos/v1.12.0/amd64 my-instance
 
 # Or import split format files directly from GitHub releases
 # Note: You need both the metadata and disk files
-incus image import incus-amd64.tar.xz disk-amd64.qcow2 --alias talos-v1.12.0-amd64
+incus image import talos-amd64-incus.tar.xz talos-amd64.qcow2 --alias talos-v1.12.0-amd64
 incus launch talos-v1.12.0-amd64 my-instance
 ```
 
@@ -52,8 +52,14 @@ Releases are signed with GPG for verification.
 
 2. Download the signature file from the release (`.asc` file)
 
-3. Verify:
+3. Verify metadata files:
    ```bash
-   gpg --verify incus-amd64.tar.xz.asc incus-amd64.tar.xz
-   gpg --verify incus-arm64.tar.xz.asc incus-arm64.tar.xz
+   gpg --verify talos-amd64-incus.tar.xz.asc talos-amd64-incus.tar.xz
+   gpg --verify talos-arm64-incus.tar.xz.asc talos-arm64-incus.tar.xz
+   ```
+
+4. Verify disk files:
+   ```bash
+   gpg --verify talos-amd64.qcow2.asc talos-amd64.qcow2
+   gpg --verify talos-arm64.qcow2.asc talos-arm64.qcow2
    ```

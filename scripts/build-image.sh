@@ -8,8 +8,8 @@ BASE_URL="https://github.com/siderolabs/talos/releases/download/${VERSION}"
 ORIG_DIR="$(pwd)"
 WORK_DIR="${ORIG_DIR}/build-${ARCH}"
 RAW_FILE="${WORK_DIR}/metal-${ARCH}.raw.zst"
-METADATA_TARBALL="incus-${ARCH}.tar.xz"
-DISK_FILE="disk-${ARCH}.qcow2"
+METADATA_TARBALL="talos-${ARCH}-incus.tar.xz"
+DISK_FILE="talos-${ARCH}.qcow2"
 
 echo "Creating split-format Talos image for ${ARCH} (${VERSION})..."
 

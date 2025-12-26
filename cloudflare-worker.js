@@ -229,18 +229,20 @@ async function handleImages(env) {
 async function handleImageDownload(request, env) {
   const url = new URL(request.url);
   
-  // Simplestreams path format: /images/talos/{version}/{arch}/{variant}/{versionKey}/incus.tar.xz
-  // Example: /images/talos/v1.12.0/amd64/default/20251226_04:25/incus.tar.xz
-  const simplestreamsMatch = url.pathname.match(/^\/images\/talos\/([^\/]+)\/([^\/]+)\/([^\/]+)\/([^\/]+)\/incus\.tar\.xz$/);
+  // Simplestreams path format: /images/talos/{version}/{arch}/{variant}/{versionKey}/{filename}
+  // Examples:
+  //   /images/talos/v1.12.0/amd64/default/20251226_05:39/incus.tar.xz (metadata)
+  //   /images/talos/v1.12.0/amd64/default/20251226_05:39/disk.qcow2 (disk)
+  const simplestreamsMatch = url.pathname.match(/^\/images\/talos\/([^\/]+)\/([^\/]+)\/([^\/]+)\/([^\/]+)\/(.+)$/);
   
   if (!simplestreamsMatch) {
-    return new Response('Invalid path format. Expected: /images/talos/{version}/{arch}/{variant}/{versionKey}/incus.tar.xz', { 
+    return new Response('Invalid path format. Expected: /images/talos/{version}/{arch}/{variant}/{versionKey}/{filename}', { 
       status: 400,
       headers: { 'Content-Type': 'text/plain' }
     });
   }
   
-  const [, version, arch, variant, versionKey] = simplestreamsMatch;
+  const [, version, arch, variant, versionKey, filename] = simplestreamsMatch;
   
   // Normalize architecture names to Incus standard
   const archMap = {
@@ -281,11 +283,11 @@ async function handleImageDownload(request, env) {
   if (filename === 'incus.tar.xz' || filename === 'lxd.tar.xz') {
     // Metadata file
     hash = metadata.meta_hash;
-    githubFilename = `incus-${normalizedArch}.tar.xz`;
+    githubFilename = `talos-${normalizedArch}-incus.tar.xz`;
   } else if (filename === 'disk.qcow2' || filename === 'disk-kvm.img') {
     // Disk file
     hash = metadata.disk_hash;
-    githubFilename = `disk-${normalizedArch}.qcow2`;
+    githubFilename = `talos-${normalizedArch}.qcow2`;
   } else {
     return new Response(`Unknown file: ${filename}. Expected incus.tar.xz, lxd.tar.xz, or disk.qcow2`, { 
       status: 400,
