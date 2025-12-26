@@ -5,7 +5,7 @@
 *.raw.zst
 *.qcow2
 *.img
-build/
+build-*/
 dist/
 
 # OS files

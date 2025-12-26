@@ -5,16 +5,15 @@ Automatically builds and releases unified Incus images from Talos OS releases.
 ## Usage
 
 ```bash
-# Import and launch from images.windsorcli.dev (recommended)
-incus image import https://images.windsorcli.dev/talos-incus/v1.12.0/incus-amd64.tar.xz --alias talos-v1.12.0-amd64
-incus launch talos-v1.12.0-amd64 my-instance
-
-# Or launch directly from URL
-incus launch https://images.windsorcli.dev/talos-incus/v1.12.0/incus-amd64.tar.xz my-instance
-
-# Or use simplestreams remote (after adding: incus remote add talos https://images.windsorcli.dev --protocol simplestreams)
+# Use simplestreams remote (recommended)
+incus remote add talos https://images.windsorcli.dev --protocol simplestreams
 incus image list talos:
 incus launch talos:talos/v1.12.0/amd64 my-instance
+
+# Or import split format files directly from GitHub releases
+# Note: You need both the metadata and disk files
+incus image import incus-amd64.tar.xz disk-amd64.qcow2 --alias talos-v1.12.0-amd64
+incus launch talos-v1.12.0-amd64 my-instance
 ```
 
 ## How It Works
@@ -22,8 +21,8 @@ incus launch talos:talos/v1.12.0/amd64 my-instance
 This repository automatically builds Incus images directly from [Talos OS releases](https://github.com/siderolabs/talos). When a new Talos version is released, Renovate automatically updates the version and triggers a build that:
 
 - Downloads the official Talos disk images from `siderolabs/talos`
-- Converts them to the unified Incus format
-- Signs them with GPG
+- Converts them to split-format Incus images (metadata + disk files)
+- Signs all files with GPG
 - Releases them here
 
 ### Cloudflare Worker Proxy

@@ -31,6 +31,7 @@ jobs:
 
       - name: Verify artifacts
         run: |
+          # Verify metadata files
           if [ ! -f "incus-amd64.tar.xz" ]; then
             echo "Error: incus-amd64.tar.xz not found"
             exit 1
@@ -39,49 +40,92 @@ jobs:
             echo "Error: incus-arm64.tar.xz not found"
             exit 1
           fi
-          echo "✓ Both artifacts verified:"
-          ls -lh incus-*.tar.xz
+          # Verify disk files
+          if [ ! -f "disk-amd64.qcow2" ]; then
+            echo "Error: disk-amd64.qcow2 not found"
+            exit 1
+          fi
+          if [ ! -f "disk-arm64.qcow2" ]; then
+            echo "Error: disk-arm64.qcow2 not found"
+            exit 1
+          fi
+          echo "✓ All artifacts verified:"
+          ls -lh incus-*.tar.xz disk-*.qcow2
 
       - name: Calculate SHA256 hashes and sizes
         id: hashes
         run: |
-          AMD64_HASH=$(sha256sum incus-amd64.tar.xz | cut -d' ' -f1)
-          ARM64_HASH=$(sha256sum incus-arm64.tar.xz | cut -d' ' -f1)
-          AMD64_SIZE=$(stat -c%s incus-amd64.tar.xz)
-          ARM64_SIZE=$(stat -c%s incus-arm64.tar.xz)
+          # Calculate hashes for metadata files
+          AMD64_META_HASH=$(sha256sum incus-amd64.tar.xz | cut -d' ' -f1)
+          ARM64_META_HASH=$(sha256sum incus-arm64.tar.xz | cut -d' ' -f1)
+          AMD64_META_SIZE=$(stat -c%s incus-amd64.tar.xz)
+          ARM64_META_SIZE=$(stat -c%s incus-arm64.tar.xz)
+          
+          # Calculate hashes for disk files
+          AMD64_DISK_HASH=$(sha256sum disk-amd64.qcow2 | cut -d' ' -f1)
+          ARM64_DISK_HASH=$(sha256sum disk-arm64.qcow2 | cut -d' ' -f1)
+          AMD64_DISK_SIZE=$(stat -c%s disk-amd64.qcow2)
+          ARM64_DISK_SIZE=$(stat -c%s disk-arm64.qcow2)
+          
+          # Calculate combined hash (for fingerprint) - concatenate metadata + disk, then hash
+          # This matches how Incus calculates fingerprints for split images
+          cat incus-amd64.tar.xz disk-amd64.qcow2 | sha256sum | cut -d' ' -f1 > /tmp/amd64_combined_hash
+          cat incus-arm64.tar.xz disk-arm64.qcow2 | sha256sum | cut -d' ' -f1 > /tmp/arm64_combined_hash
+          AMD64_COMBINED_HASH=$(cat /tmp/amd64_combined_hash)
+          ARM64_COMBINED_HASH=$(cat /tmp/arm64_combined_hash)
+          
           CREATION_DATE=$(date +%s)
           
-          echo "amd64_hash=${AMD64_HASH}" >> $GITHUB_OUTPUT
-          echo "arm64_hash=${ARM64_HASH}" >> $GITHUB_OUTPUT
-          echo "amd64_size=${AMD64_SIZE}" >> $GITHUB_OUTPUT
-          echo "arm64_size=${ARM64_SIZE}" >> $GITHUB_OUTPUT
+          # Output all hashes and sizes
+          echo "amd64_meta_hash=${AMD64_META_HASH}" >> $GITHUB_OUTPUT
+          echo "arm64_meta_hash=${ARM64_META_HASH}" >> $GITHUB_OUTPUT
+          echo "amd64_disk_hash=${AMD64_DISK_HASH}" >> $GITHUB_OUTPUT
+          echo "arm64_disk_hash=${ARM64_DISK_HASH}" >> $GITHUB_OUTPUT
+          echo "amd64_combined_hash=${AMD64_COMBINED_HASH}" >> $GITHUB_OUTPUT
+          echo "arm64_combined_hash=${ARM64_COMBINED_HASH}" >> $GITHUB_OUTPUT
+          echo "amd64_meta_size=${AMD64_META_SIZE}" >> $GITHUB_OUTPUT
+          echo "arm64_meta_size=${ARM64_META_SIZE}" >> $GITHUB_OUTPUT
+          echo "amd64_disk_size=${AMD64_DISK_SIZE}" >> $GITHUB_OUTPUT
+          echo "arm64_disk_size=${ARM64_DISK_SIZE}" >> $GITHUB_OUTPUT
           echo "creation_date=${CREATION_DATE}" >> $GITHUB_OUTPUT
           
           echo "✓ Hashes and sizes calculated:"
-          echo "  AMD64: ${AMD64_HASH} (${AMD64_SIZE} bytes)"
-          echo "  ARM64: ${ARM64_HASH} (${ARM64_SIZE} bytes)"
+          echo "  AMD64 Metadata: ${AMD64_META_HASH} (${AMD64_META_SIZE} bytes)"
+          echo "  AMD64 Disk: ${AMD64_DISK_HASH} (${AMD64_DISK_SIZE} bytes)"
+          echo "  AMD64 Combined: ${AMD64_COMBINED_HASH}"
+          echo "  ARM64 Metadata: ${ARM64_META_HASH} (${ARM64_META_SIZE} bytes)"
+          echo "  ARM64 Disk: ${ARM64_DISK_HASH} (${ARM64_DISK_SIZE} bytes)"
+          echo "  ARM64 Combined: ${ARM64_COMBINED_HASH}"
       
       - name: Verify artifacts exist and match hashes
         run: |
           # Recalculate hashes from files to verify they match
-          AMD64_VERIFY_HASH=$(sha256sum incus-amd64.tar.xz | cut -d' ' -f1)
-          ARM64_VERIFY_HASH=$(sha256sum incus-arm64.tar.xz | cut -d' ' -f1)
+          AMD64_META_VERIFY=$(sha256sum incus-amd64.tar.xz | cut -d' ' -f1)
+          ARM64_META_VERIFY=$(sha256sum incus-arm64.tar.xz | cut -d' ' -f1)
+          AMD64_DISK_VERIFY=$(sha256sum disk-amd64.qcow2 | cut -d' ' -f1)
+          ARM64_DISK_VERIFY=$(sha256sum disk-arm64.qcow2 | cut -d' ' -f1)
           
-          if [ "${AMD64_VERIFY_HASH}" != "${{ steps.hashes.outputs.amd64_hash }}" ]; then
-            echo "Error: AMD64 hash mismatch!"
-            echo "  Calculated: ${{ steps.hashes.outputs.amd64_hash }}"
-            echo "  Verified: ${AMD64_VERIFY_HASH}"
+          if [ "${AMD64_META_VERIFY}" != "${{ steps.hashes.outputs.amd64_meta_hash }}" ]; then
+            echo "Error: AMD64 metadata hash mismatch!"
             exit 1
           fi
           
-          if [ "${ARM64_VERIFY_HASH}" != "${{ steps.hashes.outputs.arm64_hash }}" ]; then
-            echo "Error: ARM64 hash mismatch!"
-            echo "  Calculated: ${{ steps.hashes.outputs.arm64_hash }}"
-            echo "  Verified: ${ARM64_VERIFY_HASH}"
+          if [ "${ARM64_META_VERIFY}" != "${{ steps.hashes.outputs.arm64_meta_hash }}" ]; then
+            echo "Error: ARM64 metadata hash mismatch!"
             exit 1
           fi
           
-          echo "✓ Hash verification passed for both architectures"
+          if [ "${AMD64_DISK_VERIFY}" != "${{ steps.hashes.outputs.amd64_disk_hash }}" ]; then
+            echo "Error: AMD64 disk hash mismatch!"
+            exit 1
+          fi
+          
+          if [ "${ARM64_DISK_VERIFY}" != "${{ steps.hashes.outputs.arm64_disk_hash }}" ]; then
+            echo "Error: ARM64 disk hash mismatch!"
+            exit 1
+          fi
+          
+          echo "✓ Hash verification passed for all files"
 
       - name: Import GPG key
         run: |
@@ -94,6 +138,7 @@ jobs:
         run: |
           GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format LONG | grep '^sec' | awk '{print $2}' | cut -d'/' -f2 | head -1)
           echo "Signing with key: ${GPG_KEY_ID}"
+          # Sign metadata files
           gpg --batch --yes --detach-sign --armor \
             --pinentry-mode loopback \
             --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
@@ -106,6 +151,19 @@ jobs:
             -u "${GPG_KEY_ID}" \
             -o incus-arm64.tar.xz.asc \
             incus-arm64.tar.xz
+          # Sign disk files
+          gpg --batch --yes --detach-sign --armor \
+            --pinentry-mode loopback \
+            --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
+            -u "${GPG_KEY_ID}" \
+            -o disk-amd64.qcow2.asc \
+            disk-amd64.qcow2
+          gpg --batch --yes --detach-sign --armor \
+            --pinentry-mode loopback \
+            --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
+            -u "${GPG_KEY_ID}" \
+            -o disk-arm64.qcow2.asc \
+            disk-arm64.qcow2
           echo "✓ Signatures created:"
           ls -lh *.asc
         env:
@@ -139,16 +197,24 @@ jobs:
           REPO="talos-incus"
           
           # Trim whitespace and verify hash format (64 hex chars)
-          AMD64_HASH=$(echo "${{ steps.hashes.outputs.amd64_hash }}" | tr -d '[:space:]')
-          ARM64_HASH=$(echo "${{ steps.hashes.outputs.arm64_hash }}" | tr -d '[:space:]')
-          AMD64_SIZE="${{ steps.hashes.outputs.amd64_size }}"
-          ARM64_SIZE="${{ steps.hashes.outputs.arm64_size }}"
+          AMD64_META_HASH=$(echo "${{ steps.hashes.outputs.amd64_meta_hash }}" | tr -d '[:space:]')
+          ARM64_META_HASH=$(echo "${{ steps.hashes.outputs.arm64_meta_hash }}" | tr -d '[:space:]')
+          AMD64_DISK_HASH=$(echo "${{ steps.hashes.outputs.amd64_disk_hash }}" | tr -d '[:space:]')
+          ARM64_DISK_HASH=$(echo "${{ steps.hashes.outputs.arm64_disk_hash }}" | tr -d '[:space:]')
+          AMD64_COMBINED_HASH=$(echo "${{ steps.hashes.outputs.amd64_combined_hash }}" | tr -d '[:space:]')
+          ARM64_COMBINED_HASH=$(echo "${{ steps.hashes.outputs.arm64_combined_hash }}" | tr -d '[:space:]')
+          
+          AMD64_META_SIZE="${{ steps.hashes.outputs.amd64_meta_size }}"
+          ARM64_META_SIZE="${{ steps.hashes.outputs.arm64_meta_size }}"
+          AMD64_DISK_SIZE="${{ steps.hashes.outputs.amd64_disk_size }}"
+          ARM64_DISK_SIZE="${{ steps.hashes.outputs.arm64_disk_size }}"
           CREATION_DATE="${{ steps.hashes.outputs.creation_date }}"
           
-          if [ ${#AMD64_HASH} -ne 64 ] || [ ${#ARM64_HASH} -ne 64 ]; then
+          # Verify hash lengths
+          if [ ${#AMD64_META_HASH} -ne 64 ] || [ ${#ARM64_META_HASH} -ne 64 ] || \
+             [ ${#AMD64_DISK_HASH} -ne 64 ] || [ ${#ARM64_DISK_HASH} -ne 64 ] || \
+             [ ${#AMD64_COMBINED_HASH} -ne 64 ] || [ ${#ARM64_COMBINED_HASH} -ne 64 ]; then
             echo "Error: Invalid hash length (expected 64 hex characters)"
-            echo "AMD64 hash length: ${#AMD64_HASH}"
-            echo "ARM64 hash length: ${#ARM64_HASH}"
             exit 1
           fi
           
@@ -156,22 +222,47 @@ jobs:
           PRODUCT_AMD64="product:talos:${TALOS_VERSION}:amd64:default"
           PRODUCT_ARM64="product:talos:${TALOS_VERSION}:arm64:default"
           
-          # Create metadata JSON for each architecture (unified format)
+          # Create metadata JSON for each architecture (split format)
+          # Stores both metadata and disk file info, plus combined hash for fingerprint
           AMD64_METADATA=$(jq -n \
-            --arg hash "${AMD64_HASH}" \
-            --arg size "${AMD64_SIZE}" \
+            --arg meta_hash "${AMD64_META_HASH}" \
+            --arg disk_hash "${AMD64_DISK_HASH}" \
+            --arg combined_hash "${AMD64_COMBINED_HASH}" \
+            --arg meta_size "${AMD64_META_SIZE}" \
+            --arg disk_size "${AMD64_DISK_SIZE}" \
             --arg date "${CREATION_DATE}" \
-            '{hash: $hash, size: ($size | tonumber), creation_date: $date}')
+            '{
+              meta_hash: $meta_hash,
+              meta_size: ($meta_size | tonumber),
+              disk_hash: $disk_hash,
+              disk_size: ($disk_size | tonumber),
+              combined_hash: $combined_hash,
+              creation_date: ($date | tonumber)
+            }')
           
           ARM64_METADATA=$(jq -n \
-            --arg hash "${ARM64_HASH}" \
-            --arg size "${ARM64_SIZE}" \
+            --arg meta_hash "${ARM64_META_HASH}" \
+            --arg disk_hash "${ARM64_DISK_HASH}" \
+            --arg combined_hash "${ARM64_COMBINED_HASH}" \
+            --arg meta_size "${ARM64_META_SIZE}" \
+            --arg disk_size "${ARM64_DISK_SIZE}" \
             --arg date "${CREATION_DATE}" \
-            '{hash: $hash, size: ($size | tonumber), creation_date: $date}')
+            '{
+              meta_hash: $meta_hash,
+              meta_size: ($meta_size | tonumber),
+              disk_hash: $disk_hash,
+              disk_size: ($disk_size | tonumber),
+              combined_hash: $combined_hash,
+              creation_date: ($date | tonumber)
+            }')
           
           echo "Uploading metadata to KV:"
-          echo "  AMD64: ${AMD64_HASH} (${AMD64_SIZE} bytes)"
-          echo "  ARM64: ${ARM64_HASH} (${ARM64_SIZE} bytes)"
+          echo "  AMD64 Metadata: ${AMD64_META_HASH} (${AMD64_META_SIZE} bytes)"
+          echo "  AMD64 Disk: ${AMD64_DISK_HASH} (${AMD64_DISK_SIZE} bytes)"
+          echo "  AMD64 Combined: ${AMD64_COMBINED_HASH}"
+          echo "  ARM64 Metadata: ${ARM64_META_HASH} (${ARM64_META_SIZE} bytes)"
+          echo "  ARM64 Disk: ${ARM64_DISK_HASH} (${ARM64_DISK_SIZE} bytes)"
+          echo "  ARM64 Combined: ${ARM64_COMBINED_HASH}"
           
           NAMESPACE_ID="${{ steps.kv_namespace.outputs.namespace_id }}"
           API_TOKEN="${{ secrets.CLOUDFLARE_API_TOKEN }}"
@@ -267,7 +358,7 @@ jobs:
           # Build file list for release
           RELEASE_FILES=("incus-amd64.tar.xz" "incus-arm64.tar.xz" "incus-amd64.tar.xz.asc" "incus-arm64.tar.xz.asc")
           
-          NOTES="Automated release of Talos OS unified images for Incus.
+          NOTES="Automated release of Talos OS split-format images for Incus.
           
           **Version:** ${TALOS_VERSION}
           
@@ -275,24 +366,26 @@ jobs:
           - amd64 (x86_64)
           - arm64 (aarch64)
           
-          **Usage:**
+          **Usage (Simplestreams - Recommended):**
           
-          **AMD64:**
           \`\`\`bash
-          incus image import https://images.windsorcli.dev/talos-incus/${TALOS_VERSION}/incus-amd64.tar.xz --alias talos-${TALOS_VERSION}-amd64
-          incus launch talos-${TALOS_VERSION}-amd64 my-talos-instance
-          \`\`\`
-          
-          **ARM64:**
-          \`\`\`bash
-          incus image import https://images.windsorcli.dev/talos-incus/${TALOS_VERSION}/incus-arm64.tar.xz --alias talos-${TALOS_VERSION}-arm64
-          incus launch talos-${TALOS_VERSION}-arm64 my-talos-instance
+          incus remote add talos https://images.windsorcli.dev --protocol simplestreams
+          incus image list talos:
+          incus launch talos:talos/${TALOS_VERSION}/amd64 my-talos-instance
           \`\`\`
           
           **Verification:**
+          
+          Verify metadata files:
           \`\`\`bash
           gpg --verify incus-amd64.tar.xz.asc incus-amd64.tar.xz
           gpg --verify incus-arm64.tar.xz.asc incus-arm64.tar.xz
+          \`\`\`
+          
+          Verify disk files:
+          \`\`\`bash
+          gpg --verify disk-amd64.qcow2.asc disk-amd64.qcow2
+          gpg --verify disk-arm64.qcow2.asc disk-arm64.qcow2
           \`\`\`"
           
           gh release create "${TALOS_VERSION}" \

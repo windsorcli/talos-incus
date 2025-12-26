@@ -71,7 +71,7 @@ async function getAllImageMetadata(env) {
         
         if (!images[simplestreamsKey]) {
           images[simplestreamsKey] = {
-            aliases: `talos/${version}/${arch}/${variant},talos/${version}/${arch}`,
+            aliases: `talos/${version}/${arch}/${variant},talos/${version}/${arch},talos/${version}`,
             arch: arch,
             os: 'Talos',
             release: version,
@@ -92,30 +92,42 @@ async function getAllImageMetadata(env) {
         const minutes = String(date.getUTCMinutes()).padStart(2, '0');
         const versionKey = `${year}${month}${day}_${hours}:${minutes}`;
         
-        // Path is relative to the simplestreams base URL
+        // Paths are relative to the simplestreams base URL
         // Incus will construct the full URL: {baseUrl}/{path}
         // Match official format: images/{os}/{release}/{arch}/{variant}/{version_key}/{file}
-        // Official format: images/almalinux/10/amd64/default/20251222_23:08/incus.tar.xz
-        // Our format: images/talos/${version}/${arch}/${variant}/${versionKey}/incus.tar.xz
-        const imagePath = `images/talos/${version}/${arch}/${variant}/${versionKey}/incus.tar.xz`;
-        
+        const metaPath = `images/talos/${version}/${arch}/${variant}/${versionKey}/incus.tar.xz`;
+        const diskPath = `images/talos/${version}/${arch}/${variant}/${versionKey}/disk.qcow2`;
+
+        // For split format
+        // - incus.tar.xz: metadata file (small, ~1KB)
+        // - disk-kvm.img: disk file (large, ~197MB)
+        // - combined_disk-kvm-img_sha256: hash of concatenated metadata + disk (for fingerprint)
         images[simplestreamsKey].versions[versionKey] = {
           items: {
+            // Metadata file (required) - small tarball with metadata.yaml only
             'incus.tar.xz': {
               ftype: 'incus.tar.xz',
-              sha256: metadata.hash,
-              size: metadata.size,
-              path: imagePath,
-              combined_sha256: metadata.hash,
-              combined_rootxz_sha256: metadata.hash
+              sha256: metadata.meta_hash,
+              size: metadata.meta_size,
+              path: metaPath,
+              // Combined hash for disk-kvm.img format (concatenated metadata + disk)
+              // This is used as the image fingerprint by Incus
+              'combined_disk-kvm-img_sha256': metadata.combined_hash
             },
+            // Disk file (REQUIRED for discovery!) - qcow2 disk image
+            'disk-kvm.img': {
+              ftype: 'disk-kvm.img',
+              sha256: metadata.disk_hash,
+              size: metadata.disk_size,
+              path: diskPath
+            },
+            // LXD compatibility (alias to incus.tar.xz)
             'lxd.tar.xz': {
               ftype: 'lxd.tar.xz',
-              sha256: metadata.hash,
-              size: metadata.size,
-              path: imagePath,
-              combined_sha256: metadata.hash,
-              combined_rootxz_sha256: metadata.hash
+              sha256: metadata.meta_hash,
+              size: metadata.meta_size,
+              path: metaPath,
+              'combined_disk-kvm-img_sha256': metadata.combined_hash
             }
           }
         };
@@ -168,7 +180,8 @@ async function handleIndex(env) {
     format: 'index:1.0'
   };
   
-  return new Response(JSON.stringify(index, null, 2), {
+  // Use compact JSON (no pretty-printing) to match official format exactly
+  return new Response(JSON.stringify(index), {
     headers: {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*'
@@ -190,7 +203,8 @@ async function handleIndex(env) {
 async function handleImages(env) {
   const images = await getAllImageMetadata(env);
   
-  return new Response(JSON.stringify(images, null, 2), {
+  // Use compact JSON (no pretty-printing) to match official format exactly
+  return new Response(JSON.stringify(images), {
     headers: {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*'
@@ -260,13 +274,28 @@ async function handleImageDownload(request, env) {
     });
   }
   
-  const hash = metadata.hash;
+  // Determine which file is being requested and get appropriate hash
+  let hash;
+  let githubFilename;
   
-      // GitHub releases URL (source of truth)
-      // Map simplestreams path back to GitHub release filename
-      const githubFilename = `incus-${normalizedArch}.tar.xz`;
-      const githubUrl = `https://github.com/windsorcli/talos-incus/releases/download/${version}/${githubFilename}`;
-      const proxyUrl = `${new URL(request.url).protocol}//${new URL(request.url).host}${new URL(request.url).pathname}`;
+  if (filename === 'incus.tar.xz' || filename === 'lxd.tar.xz') {
+    // Metadata file
+    hash = metadata.meta_hash;
+    githubFilename = `incus-${normalizedArch}.tar.xz`;
+  } else if (filename === 'disk.qcow2' || filename === 'disk-kvm.img') {
+    // Disk file
+    hash = metadata.disk_hash;
+    githubFilename = `disk-${normalizedArch}.qcow2`;
+  } else {
+    return new Response(`Unknown file: ${filename}. Expected incus.tar.xz, lxd.tar.xz, or disk.qcow2`, { 
+      status: 400,
+      headers: { 'Content-Type': 'text/plain' }
+    });
+  }
+  
+  // GitHub releases URL (source of truth)
+  const githubUrl = `https://github.com/windsorcli/talos-incus/releases/download/${version}/${githubFilename}`;
+  const proxyUrl = `${new URL(request.url).protocol}//${new URL(request.url).host}${new URL(request.url).pathname}`;
   
   try {
     const response = await fetch(githubUrl);

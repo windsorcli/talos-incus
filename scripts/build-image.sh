@@ -7,9 +7,10 @@ ARCH="${2:-amd64}"
 BASE_URL="https://github.com/siderolabs/talos/releases/download/${VERSION}"
 WORK_DIR="$(pwd)/build-${ARCH}"
 RAW_FILE="${WORK_DIR}/metal-${ARCH}.raw.zst"
-OUTPUT_FILE="incus-${ARCH}.tar.xz"
+METADATA_FILE="incus-${ARCH}.tar.xz"
+DISK_FILE="disk-${ARCH}.qcow2"
 
-echo "Creating unified Talos image for ${ARCH} (${VERSION})..."
+echo "Creating split-format Talos image for ${ARCH} (${VERSION})..."
 
 # Create work directory
 mkdir -p "${WORK_DIR}"
@@ -45,20 +46,20 @@ properties:
 templates: {}
 EOF
 
-# Step 5: Rename to rootfs.img
-echo "Step 5: Preparing rootfs.img..."
-ROOTFS_FILE="${WORK_DIR}/rootfs.img"
-cp "${QCOW2_FILE}" "${ROOTFS_FILE}"
-
-# Step 6: Create unified tarball (using xz compression for Incus simplestreams compatibility)
-echo "Step 6: Creating unified tarball..."
+# Step 5: Create metadata tarball (metadata.yaml only, ~1KB)
+echo "Step 5: Creating metadata tarball..."
 cd "${WORK_DIR}"
-tar -cJf "../${OUTPUT_FILE}" "metadata.yaml" "rootfs.img"
+tar -cJf "../${METADATA_FILE}" "metadata.yaml"
+
+# Step 6: Copy disk image (qcow2 format for VM images)
+echo "Step 6: Preparing disk image..."
+cp "${QCOW2_FILE}" "../${DISK_FILE}"
 
 # Cleanup
 cd ..
 rm -rf "${WORK_DIR}"
 
 echo ""
-echo "✓ Successfully created ${OUTPUT_FILE}"
-echo "  File size: $(du -h ${OUTPUT_FILE} | cut -f1)"
+echo "✓ Successfully created split-format images:"
+echo "  Metadata: ${METADATA_FILE} ($(du -h ${METADATA_FILE} | cut -f1))"
+echo "  Disk: ${DISK_FILE} ($(du -h ${DISK_FILE} | cut -f1))"
