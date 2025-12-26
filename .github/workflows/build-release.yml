@@ -224,6 +224,7 @@ jobs:
           
           # Create metadata JSON for each architecture (split format)
           # Stores both metadata and disk file info, plus combined hash for fingerprint
+          # Also includes github_repo so worker knows which GitHub repo to fetch from
           AMD64_METADATA=$(jq -n \
             --arg meta_hash "${AMD64_META_HASH}" \
             --arg disk_hash "${AMD64_DISK_HASH}" \
@@ -231,13 +232,15 @@ jobs:
             --arg meta_size "${AMD64_META_SIZE}" \
             --arg disk_size "${AMD64_DISK_SIZE}" \
             --arg date "${CREATION_DATE}" \
+            --arg github_repo "talos-incus" \
             '{
               meta_hash: $meta_hash,
               meta_size: ($meta_size | tonumber),
               disk_hash: $disk_hash,
               disk_size: ($disk_size | tonumber),
               combined_hash: $combined_hash,
-              creation_date: ($date | tonumber)
+              creation_date: ($date | tonumber),
+              github_repo: $github_repo
             }')
           
           ARM64_METADATA=$(jq -n \
@@ -247,13 +250,15 @@ jobs:
             --arg meta_size "${ARM64_META_SIZE}" \
             --arg disk_size "${ARM64_DISK_SIZE}" \
             --arg date "${CREATION_DATE}" \
+            --arg github_repo "talos-incus" \
             '{
               meta_hash: $meta_hash,
               meta_size: ($meta_size | tonumber),
               disk_hash: $disk_hash,
               disk_size: ($disk_size | tonumber),
               combined_hash: $combined_hash,
-              creation_date: ($date | tonumber)
+              creation_date: ($date | tonumber),
+              github_repo: $github_repo
             }')
           
           echo "Uploading metadata to KV:"
