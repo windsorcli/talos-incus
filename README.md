@@ -1,6 +1,6 @@
-# Talos OS Unified Images for Incus
+# Talos OS Images for Incus
 
-Automatically builds and releases unified Incus images from Talos OS releases.
+Automatically builds and releases split-format Incus images from Talos OS releases.
 
 ## Usage
 
