@@ -94,7 +94,10 @@ async function getAllImageMetadata(env) {
         
         // Path is relative to the simplestreams base URL
         // Incus will construct the full URL: {baseUrl}/{path}
-        const imagePath = `talos-incus/${version}/incus-${arch}.tar.xz`;
+        // Match official format: images/{os}/{release}/{arch}/{variant}/{version_key}/{file}
+        // Official format: images/almalinux/10/amd64/default/20251222_23:08/incus.tar.xz
+        // Our format: images/talos/${version}/${arch}/${variant}/${versionKey}/incus.tar.xz
+        const imagePath = `images/talos/${version}/${arch}/${variant}/${versionKey}/incus.tar.xz`;
         
         images[simplestreamsKey].versions[versionKey] = {
           items: {
@@ -196,38 +199,34 @@ async function handleImages(env) {
 }
 
 /**
- * Handles direct image download requests.
+ * Handles simplestreams image download requests.
  * 
  * Proxies requests to GitHub Releases and adds required Incus headers:
  * - Incus-Image-Hash: SHA256 hash of the image file
  * - Incus-Image-URL: URL where the image is being served from
  * 
- * Path format: /{repo}/{version}/{filename}
- * Example: /talos-incus/v1.12.0/incus-amd64.tar.gz
+ * Path format: /images/talos/{version}/{arch}/{variant}/{versionKey}/incus.tar.xz
+ * Example: /images/talos/v1.12.0/amd64/default/20251226_04:25/incus.tar.xz
  * 
  * @param {Request} request - The incoming HTTP request
  * @param {Object} env - Cloudflare Worker environment with IMAGE_HASHES KV binding
- * @param {Array} pathMatch - Regex match result from path pattern
  * @returns {Promise<Response>} Streaming response with image data and Incus headers
  */
-async function handleImageDownload(request, env, pathMatch) {
-  const [, repo, version, filename] = pathMatch;
+async function handleImageDownload(request, env) {
+  const url = new URL(request.url);
   
-  // Extract architecture from filename and normalize
-  // Support both .tar.gz and .tar.xz for backward compatibility
-  const archMatch = filename.match(/([a-z0-9_]+)\.tar\.(gz|xz)$/);
-  if (!archMatch) {
-    return new Response('Invalid filename format. Expected: *.tar.gz or *.tar.xz', { 
+  // Simplestreams path format: /images/talos/{version}/{arch}/{variant}/{versionKey}/incus.tar.xz
+  // Example: /images/talos/v1.12.0/amd64/default/20251226_04:25/incus.tar.xz
+  const simplestreamsMatch = url.pathname.match(/^\/images\/talos\/([^\/]+)\/([^\/]+)\/([^\/]+)\/([^\/]+)\/incus\.tar\.xz$/);
+  
+  if (!simplestreamsMatch) {
+    return new Response('Invalid path format. Expected: /images/talos/{version}/{arch}/{variant}/{versionKey}/incus.tar.xz', { 
       status: 400,
       headers: { 'Content-Type': 'text/plain' }
     });
   }
   
-  let arch = archMatch[1];
-  if (arch.includes('-')) {
-    const parts = arch.split('-');
-    arch = parts[parts.length - 1];
-  }
+  const [, version, arch, variant, versionKey] = simplestreamsMatch;
   
   // Normalize architecture names to Incus standard
   const archMap = {
@@ -237,14 +236,14 @@ async function handleImageDownload(request, env, pathMatch) {
     'x64': 'amd64',
     'amd64': 'amd64',
   };
-  arch = archMap[arch.toLowerCase()] || arch;
+  const normalizedArch = archMap[arch.toLowerCase()] || arch;
   
   // Get metadata from KV using unified product key format
-  const productKey = `product:talos:${version}:${arch}:default`;
+  const productKey = `product:talos:${version}:${normalizedArch}:${variant}`;
   const metadataJson = await env.IMAGE_HASHES.get(productKey);
   
   if (!metadataJson) {
-    return new Response(`Product not found for ${repo}/${version}/${arch}. Image may not be available yet.`, { 
+    return new Response(`Product not found for talos/${version}/${normalizedArch}/${variant}. Image may not be available yet.`, { 
       status: 404,
       headers: { 'Content-Type': 'text/plain' }
     });
@@ -263,9 +262,11 @@ async function handleImageDownload(request, env, pathMatch) {
   
   const hash = metadata.hash;
   
-  // GitHub releases URL (source of truth)
-  const githubUrl = `https://github.com/windsorcli/${repo}/releases/download/${version}/${filename}`;
-  const proxyUrl = `${new URL(request.url).protocol}//${new URL(request.url).host}${new URL(request.url).pathname}`;
+      // GitHub releases URL (source of truth)
+      // Map simplestreams path back to GitHub release filename
+      const githubFilename = `incus-${normalizedArch}.tar.xz`;
+      const githubUrl = `https://github.com/windsorcli/talos-incus/releases/download/${version}/${githubFilename}`;
+      const proxyUrl = `${new URL(request.url).protocol}//${new URL(request.url).host}${new URL(request.url).pathname}`;
   
   try {
     const response = await fetch(githubUrl);
@@ -303,7 +304,7 @@ async function handleImageDownload(request, env, pathMatch) {
  * Routes requests to appropriate handlers based on path:
  * - /streams/v1/index.json → handleIndex()
  * - /streams/v1/images.json → handleImages()
- * - /{repo}/{version}/{filename} → handleImageDownload()
+ * - /images/talos/{version}/{arch}/{variant}/{versionKey}/incus.tar.xz → handleImageDownload()
  * 
  * @type {Object}
  */
@@ -327,10 +328,10 @@ export default {
           return handleImages(env);
         }
     
-    // Direct image download (backward compatible)
-    const pathMatch = url.pathname.match(/^\/([^\/]+)\/(v[\d.]+)\/(.+)$/);
-    if (pathMatch) {
-      return handleImageDownload(request, env, pathMatch);
+    // Simplestreams image download
+    // Path format: /images/talos/{version}/{arch}/{variant}/{versionKey}/incus.tar.xz
+    if (url.pathname.match(/^\/images\/talos\//)) {
+      return handleImageDownload(request, env);
     }
     
     return new Response('Not Found', { status: 404 });
