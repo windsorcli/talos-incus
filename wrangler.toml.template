@@ -8,6 +8,9 @@ routes = [
 ]
 
 [vars]
+# GitHub organization name (e.g., 'windsorcli', 'myorg')
+# Override this to use your own GitHub org when forking
+GITHUB_ORG = "windsorcli"
 
 [[kv_namespaces]]
 binding = "IMAGE_HASHES"

@@ -1,21 +1,32 @@
 /**
- * Cloudflare Worker for images.windsorcli.dev
+ * Cloudflare Worker for Incus simplestreams image server
  * 
  * Implements simplestream protocol for Incus image server.
  * 
  * Supports:
  * - /streams/v1/index.json - Lists available products (simplestreams index)
  * - /streams/v1/images.json - Full product metadata (simplestreams images)
- * - /{repo}/{version}/{filename} - Direct image download with Incus headers
+ * - /images/{product}/{version}/{arch}/{variant}/{versionKey}/{filename} - Direct image download with Incus headers
+ * 
+ * Configuration:
+ * - GITHUB_ORG: GitHub organization name (default: 'windsorcli')
+ * - Can be overridden via Cloudflare Worker environment variables
  * 
  * @module cloudflare-worker
  */
 
+// Configuration - can be overridden via Cloudflare Worker environment variables
+const CONFIG = {
+  // GitHub organization name (e.g., 'windsorcli', 'myorg')
+  GITHUB_ORG: 'windsorcli',
+};
+
 /**
  * Retrieves the list of all product keys from Cloudflare KV.
  * 
- * Product keys follow the format: product:talos:{version}:{arch}:{variant}
+ * Product keys follow the format: product:{os}:{version}:{arch}:{variant}
  * Example: product:talos:v1.12.0:amd64:default
+ *          product:alpine:v3.19:amd64:default (future)
  * 
  * @param {Object} env - Cloudflare Worker environment with IMAGE_HASHES KV binding
  * @returns {Promise<string[]>} Array of product keys
@@ -52,8 +63,8 @@ async function getAllImageMetadata(env) {
   const images = {};
   
   for (const kvProductKey of products) {
-    // KV key format: product:talos:{version}:{arch}:{variant}
-    // Simplestreams key format: talos:{version}:{arch}:{variant} (no "product:" prefix)
+    // KV key format: product:{os}:{version}:{arch}:{variant}
+    // Simplestreams key format: {os}:{version}:{arch}:{variant} (no "product:" prefix)
     const parts = kvProductKey.split(':');
     if (parts.length !== 5 || parts[0] !== 'product') continue;
     
@@ -71,9 +82,9 @@ async function getAllImageMetadata(env) {
         
         if (!images[simplestreamsKey]) {
           images[simplestreamsKey] = {
-            aliases: `talos/${version}/${arch}/${variant},talos/${version}/${arch},talos/${version}`,
+            aliases: `${os}/${version}/${arch}/${variant},${os}/${version}/${arch},${os}/${version}`,
             arch: arch,
-            os: 'Talos',
+            os: os.charAt(0).toUpperCase() + os.slice(1),
             release: version,
             release_title: version,
             requirements: {},
@@ -95,27 +106,30 @@ async function getAllImageMetadata(env) {
         // Paths are relative to the simplestreams base URL
         // Incus will construct the full URL: {baseUrl}/{path}
         // Match official format: images/{os}/{release}/{arch}/{variant}/{version_key}/{file}
-        const metaPath = `images/talos/${version}/${arch}/${variant}/${versionKey}/incus.tar.xz`;
-        const diskPath = `images/talos/${version}/${arch}/${variant}/${versionKey}/disk.qcow2`;
+        // Use 'os' (product name) from KV key, not hardcoded 'talos'
+        const metaPath = `images/${os}/${version}/${arch}/${variant}/${versionKey}/incus.tar.xz`;
+        const diskPath = `images/${os}/${version}/${arch}/${variant}/${versionKey}/disk.qcow2`;
 
         // For split format
         // - incus.tar.xz: metadata file (small, ~1KB)
-        // - disk-kvm.img: disk file (large, ~197MB)
+        // - disk.qcow2: disk file (large, ~197MB) - key is 'disk.qcow2', ftype is 'disk-kvm.img'
         // - combined_disk-kvm-img_sha256: hash of concatenated metadata + disk (for fingerprint)
         images[simplestreamsKey].versions[versionKey] = {
           items: {
-            // Metadata file (required) - small tarball with metadata.yaml only
+            // Metadata file - small tarball with metadata.yaml only
             'incus.tar.xz': {
               ftype: 'incus.tar.xz',
               sha256: metadata.meta_hash,
               size: metadata.meta_size,
               path: metaPath,
-              // Combined hash for disk-kvm.img format (concatenated metadata + disk)
+              // Combined hash for VM images (concatenated metadata + disk)
+              // Property name is 'combined_disk-kvm-img_sha256' (official format)
               // This is used as the image fingerprint by Incus
               'combined_disk-kvm-img_sha256': metadata.combined_hash
             },
-            // Disk file (REQUIRED for discovery!) - qcow2 disk image
-            'disk-kvm.img': {
+            // Disk file - qcow2 disk image
+            // Key must be 'disk.qcow2' to match official simplestreams format
+            'disk.qcow2': {
               ftype: 'disk-kvm.img',
               sha256: metadata.disk_hash,
               size: metadata.disk_size,
@@ -158,11 +172,11 @@ async function getAllImageMetadata(env) {
 async function handleIndex(env) {
   const kvProducts = await getAllProducts(env);
   
-  // Convert KV product keys (product:talos:...) to simplestreams format (talos:...)
+  // Convert KV product keys (product:{os}:...) to simplestreams format ({os}:...)
   const simplestreamsProducts = kvProducts.map(kvKey => {
     const parts = kvKey.split(':');
     if (parts.length === 5 && parts[0] === 'product') {
-      // Remove "product:" prefix: product:talos:v1.12.0:amd64:default -> talos:v1.12.0:amd64:default
+      // Remove "product:" prefix: product:{os}:v1.12.0:amd64:default -> {os}:v1.12.0:amd64:default
       return parts.slice(1).join(':');
     }
     return null;
@@ -219,8 +233,9 @@ async function handleImages(env) {
  * - Incus-Image-Hash: SHA256 hash of the image file
  * - Incus-Image-URL: URL where the image is being served from
  * 
- * Path format: /images/talos/{version}/{arch}/{variant}/{versionKey}/incus.tar.xz
+ * Path format: /images/{product}/{version}/{arch}/{variant}/{versionKey}/{filename}
  * Example: /images/talos/v1.12.0/amd64/default/20251226_04:25/incus.tar.xz
+ *          /images/alpine/v3.19/amd64/default/20251226_04:25/incus.tar.xz (future)
  * 
  * @param {Request} request - The incoming HTTP request
  * @param {Object} env - Cloudflare Worker environment with IMAGE_HASHES KV binding
@@ -229,20 +244,22 @@ async function handleImages(env) {
 async function handleImageDownload(request, env) {
   const url = new URL(request.url);
   
-  // Simplestreams path format: /images/talos/{version}/{arch}/{variant}/{versionKey}/{filename}
+  // Simplestreams path format: /images/{product}/{version}/{arch}/{variant}/{versionKey}/{filename}
   // Examples:
   //   /images/talos/v1.12.0/amd64/default/20251226_05:39/incus.tar.xz (metadata)
   //   /images/talos/v1.12.0/amd64/default/20251226_05:39/disk.qcow2 (disk)
-  const simplestreamsMatch = url.pathname.match(/^\/images\/talos\/([^\/]+)\/([^\/]+)\/([^\/]+)\/([^\/]+)\/(.+)$/);
+  //   /images/alpine/v3.19/amd64/default/20251226_05:39/incus.tar.xz (future)
+  //   /images/alpine/v3.19/amd64/default/20251226_05:39/incus.tar.xz (future)
+  const simplestreamsMatch = url.pathname.match(/^\/images\/([^\/]+)\/([^\/]+)\/([^\/]+)\/([^\/]+)\/([^\/]+)\/(.+)$/);
   
   if (!simplestreamsMatch) {
-    return new Response('Invalid path format. Expected: /images/talos/{version}/{arch}/{variant}/{versionKey}/{filename}', { 
+    return new Response('Invalid path format. Expected: /images/{product}/{version}/{arch}/{variant}/{versionKey}/{filename}', { 
       status: 400,
       headers: { 'Content-Type': 'text/plain' }
     });
   }
   
-  const [, version, arch, variant, versionKey, filename] = simplestreamsMatch;
+  const [, product, version, arch, variant, versionKey, filename] = simplestreamsMatch;
   
   // Normalize architecture names to Incus standard
   const archMap = {
@@ -255,11 +272,11 @@ async function handleImageDownload(request, env) {
   const normalizedArch = archMap[arch.toLowerCase()] || arch;
   
   // Get metadata from KV using unified product key format
-  const productKey = `product:talos:${version}:${normalizedArch}:${variant}`;
+  const productKey = `product:${product}:${version}:${normalizedArch}:${variant}`;
   const metadataJson = await env.IMAGE_HASHES.get(productKey);
   
   if (!metadataJson) {
-    return new Response(`Product not found for talos/${version}/${normalizedArch}/${variant}. Image may not be available yet.`, { 
+    return new Response(`Product not found for ${product}/${version}/${normalizedArch}/${variant}. Image may not be available yet.`, { 
       status: 404,
       headers: { 'Content-Type': 'text/plain' }
     });
@@ -280,14 +297,24 @@ async function handleImageDownload(request, env) {
   let hash;
   let githubFilename;
   
+  // Get GitHub org from config (can be overridden via env vars)
+  const githubOrg = env.GITHUB_ORG || CONFIG.GITHUB_ORG;
+  
+  // GitHub repo name - defaults to product name, can be overridden per-product via metadata.github_repo in KV
+  // Examples:
+  //   - If metadata.github_repo is set: use that (e.g., 'talos-incus', 'my-custom-repo')
+  //   - Otherwise: use product name directly (e.g., 'talos' -> 'talos')
+  const githubRepo = metadata.github_repo || product;
+  const filenamePrefix = metadata.filename_prefix || product;
+  
   if (filename === 'incus.tar.xz' || filename === 'lxd.tar.xz') {
     // Metadata file
     hash = metadata.meta_hash;
-    githubFilename = `talos-${normalizedArch}-incus.tar.xz`;
+    githubFilename = `${filenamePrefix}-${normalizedArch}-incus.tar.xz`;
   } else if (filename === 'disk.qcow2' || filename === 'disk-kvm.img') {
     // Disk file
     hash = metadata.disk_hash;
-    githubFilename = `talos-${normalizedArch}.qcow2`;
+    githubFilename = `${filenamePrefix}-${normalizedArch}.qcow2`;
   } else {
     return new Response(`Unknown file: ${filename}. Expected incus.tar.xz, lxd.tar.xz, or disk.qcow2`, { 
       status: 400,
@@ -296,7 +323,8 @@ async function handleImageDownload(request, env) {
   }
   
   // GitHub releases URL (source of truth)
-  const githubUrl = `https://github.com/windsorcli/talos-incus/releases/download/${version}/${githubFilename}`;
+  // Uses configured GitHub org and repo (derived from product or metadata override)
+  const githubUrl = `https://github.com/${githubOrg}/${githubRepo}/releases/download/${version}/${githubFilename}`;
   const proxyUrl = `${new URL(request.url).protocol}//${new URL(request.url).host}${new URL(request.url).pathname}`;
   
   try {
@@ -335,7 +363,7 @@ async function handleImageDownload(request, env) {
  * Routes requests to appropriate handlers based on path:
  * - /streams/v1/index.json → handleIndex()
  * - /streams/v1/images.json → handleImages()
- * - /images/talos/{version}/{arch}/{variant}/{versionKey}/incus.tar.xz → handleImageDownload()
+ * - /images/{product}/{version}/{arch}/{variant}/{versionKey}/{filename} → handleImageDownload()
  * 
  * @type {Object}
  */
@@ -360,8 +388,9 @@ export default {
         }
     
     // Simplestreams image download
-    // Path format: /images/talos/{version}/{arch}/{variant}/{versionKey}/incus.tar.xz
-    if (url.pathname.match(/^\/images\/talos\//)) {
+    // Simplestreams image download path (generic - supports any product)
+    // Path format: /images/{product}/{version}/{arch}/{variant}/{versionKey}/{filename}
+    if (url.pathname.match(/^\/images\/[^\/]+\//)) {
       return handleImageDownload(request, env);
     }
     
