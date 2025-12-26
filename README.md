@@ -6,9 +6,9 @@ Automatically builds and releases unified Incus images from Talos OS releases.
 
 ```bash
 # Use simplestreams remote (recommended)
-incus remote add talos https://images.windsorcli.dev --protocol simplestreams
-incus image list talos:
-incus launch talos:talos/v1.12.0/amd64 my-instance
+incus remote add windsor https://images.windsorcli.dev --protocol simplestreams
+incus image list windsor:
+incus launch windsor:talos/v1.12.0/amd64 my-instance
 
 # Or import split format files directly from GitHub releases
 # Note: You need both the metadata and disk files

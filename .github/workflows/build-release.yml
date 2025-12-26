@@ -21,7 +21,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y zstd qemu-utils tar gzip curl gnupg jq
 
-      - name: Build unified images
+      - name: Build split-format images
         run: |
           chmod +x scripts/build-image.sh
           echo "Building amd64 image..."
@@ -355,8 +355,13 @@ jobs:
 
       - name: Create GitHub Release
         run: |
-          # Build file list for release
-          RELEASE_FILES=("incus-amd64.tar.xz" "incus-arm64.tar.xz" "incus-amd64.tar.xz.asc" "incus-arm64.tar.xz.asc")
+          # Build file list for release (metadata + disk files + signatures)
+          RELEASE_FILES=(
+            "incus-amd64.tar.xz" "incus-arm64.tar.xz"
+            "disk-amd64.qcow2" "disk-arm64.qcow2"
+            "incus-amd64.tar.xz.asc" "incus-arm64.tar.xz.asc"
+            "disk-amd64.qcow2.asc" "disk-arm64.qcow2.asc"
+          )
           
           NOTES="Automated release of Talos OS split-format images for Incus.
           
@@ -369,9 +374,9 @@ jobs:
           **Usage (Simplestreams - Recommended):**
           
           \`\`\`bash
-          incus remote add talos https://images.windsorcli.dev --protocol simplestreams
-          incus image list talos:
-          incus launch talos:talos/${TALOS_VERSION}/amd64 my-talos-instance
+          incus remote add windsor https://images.windsorcli.dev --protocol simplestreams
+          incus image list windsor:
+          incus launch windsor:talos/${TALOS_VERSION}/amd64 my-talos-instance
           \`\`\`
           
           **Verification:**
