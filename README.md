@@ -1,6 +1,10 @@
 # Talos OS Images for Incus
 
-Automatically builds and releases split-format Incus images from Talos OS releases.
+This repository automatically converts [Talos OS](https://www.talos.dev/) disk images into Incus-compatible virtual machine images. Talos is a minimal, immutable Linux distribution designed for Kubernetes, but its official releases don't include Incus/LXD-compatible formats.
+
+## What This Repository Does
+
+This repository sets up a simplestreams server that distributes Talos OS images for Incus. It automatically converts Talos releases into Incus-compatible VM images, signs them with GPG, and serves them via a Cloudflare Worker at `images.windsorcli.dev`. When Talos releases a new version, this repo automatically builds and publishes the Incus-compatible images.
 
 ## Usage
 
