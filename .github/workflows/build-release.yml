@@ -19,7 +19,7 @@ jobs:
       - name: Set up build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y zstd qemu-utils tar gzip curl gnupg jq
+          sudo apt-get install -y zstd qemu-utils tar xz-utils curl gnupg jq
 
       - name: Build split-format images
         run: |
