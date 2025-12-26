@@ -101,6 +101,14 @@ async function getAllImageMetadata(env) {
               path: `talos-incus/${version}/incus-${arch}.tar.gz`,
               combined_sha256: metadata.hash,
               combined_rootxz_sha256: metadata.hash
+            },
+            'lxd.tar.gz': {
+              ftype: 'lxd.tar.gz',
+              sha256: metadata.hash,
+              size: metadata.size,
+              path: `talos-incus/${version}/incus-${arch}.tar.gz`,
+              combined_sha256: metadata.hash,
+              combined_rootxz_sha256: metadata.hash
             }
           }
         };
