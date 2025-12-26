@@ -14,8 +14,8 @@
 /**
  * Retrieves the list of all product keys from Cloudflare KV.
  * 
- * Product keys follow the format: talos:{version}:{arch}:{variant}
- * Example: talos:v1.12.0:amd64:default
+ * Product keys follow the format: product:talos:{version}:{arch}:{variant}
+ * Example: product:talos:v1.12.0:amd64:default
  * 
  * @param {Object} env - Cloudflare Worker environment with IMAGE_HASHES KV binding
  * @returns {Promise<string[]>} Array of product keys
@@ -52,15 +52,14 @@ async function getAllImageMetadata(env) {
   const images = {};
   
   for (const productKey of products) {
-    // Product key format: talos:v1.12.0:amd64:default
+    // Product key format: product:talos:{version}:{arch}:{variant}
     const parts = productKey.split(':');
-    if (parts.length !== 4) continue;
+    if (parts.length !== 5 || parts[0] !== 'product') continue;
     
-    const [os, version, arch, variant] = parts;
+    const [prefix, os, version, arch, variant] = parts;
     
-    // Get metadata for this product
-    const metadataKey = `metadata:${productKey}`;
-    const metadataJson = await env.IMAGE_HASHES.get(metadataKey);
+    // Get metadata for this product (key is already in correct format)
+    const metadataJson = await env.IMAGE_HASHES.get(productKey);
     
     if (metadataJson) {
       try {
@@ -212,16 +211,29 @@ async function handleImageDownload(request, env, pathMatch) {
   };
   arch = archMap[arch.toLowerCase()] || arch;
   
-  // Get pre-calculated hash from KV store
-  const kvKey = `${repo}:${version}:${arch}`;
-  const hash = await env.IMAGE_HASHES.get(kvKey);
+  // Get metadata from KV using unified product key format
+  const productKey = `product:talos:${version}:${arch}:default`;
+  const metadataJson = await env.IMAGE_HASHES.get(productKey);
   
-  if (!hash) {
-    return new Response(`Hash not found for ${repo}/${version}/${arch}. Image may not be available yet.`, { 
+  if (!metadataJson) {
+    return new Response(`Product not found for ${repo}/${version}/${arch}. Image may not be available yet.`, { 
       status: 404,
       headers: { 'Content-Type': 'text/plain' }
     });
   }
+  
+  // Parse metadata to get hash
+  let metadata;
+  try {
+    metadata = JSON.parse(metadataJson);
+  } catch (e) {
+    return new Response(`Invalid metadata format for ${productKey}`, { 
+      status: 500,
+      headers: { 'Content-Type': 'text/plain' }
+    });
+  }
+  
+  const hash = metadata.hash;
   
   // GitHub releases URL (source of truth)
   const githubUrl = `https://github.com/windsorcli/${repo}/releases/download/${version}/${filename}`;

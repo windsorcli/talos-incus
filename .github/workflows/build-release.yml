@@ -111,10 +111,9 @@ jobs:
       - name: Upload metadata to Cloudflare KV
         run: |
           # Upload metadata to KV store for simplestream support
-          # Key formats:
-          #   - {repo}:{version}:{arch} -> hash (backward compatible)
-          #   - metadata:talos:{version}:{arch}:default -> full metadata JSON
-          #   - products:list -> list of all product keys
+          # Key format: product:talos:{version}:{arch}:{variant}
+          # Value: JSON with hash, size, creation_date
+          # Also maintain products:list -> array of product keys (lightweight, just strings)
           REPO="talos-incus"
           
           # Trim whitespace and verify hash format (64 hex chars)
@@ -131,11 +130,11 @@ jobs:
             exit 1
           fi
           
-          # Product keys for simplestream
-          PRODUCT_AMD64="talos:${TALOS_VERSION}:amd64:default"
-          PRODUCT_ARM64="talos:${TALOS_VERSION}:arm64:default"
+          # Product keys (consistent format for all entries)
+          PRODUCT_AMD64="product:talos:${TALOS_VERSION}:amd64:default"
+          PRODUCT_ARM64="product:talos:${TALOS_VERSION}:arm64:default"
           
-          # Create metadata JSON for each architecture
+          # Create metadata JSON for each architecture (unified format)
           AMD64_METADATA=$(jq -n \
             --arg hash "${AMD64_HASH}" \
             --arg size "${AMD64_SIZE}" \
@@ -156,50 +155,48 @@ jobs:
           API_TOKEN="${{ secrets.CLOUDFLARE_API_TOKEN }}"
           ACCOUNT_ID="${{ secrets.CLOUDFLARE_ACCOUNT_ID }}"
           
-          # Upload hashes (backward compatible)
-          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/${REPO}:${TALOS_VERSION}:amd64" \
-            -H "Authorization: Bearer ${API_TOKEN}" \
-            -H "Content-Type: text/plain" \
-            --data "${AMD64_HASH}"
-          
-          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/${REPO}:${TALOS_VERSION}:arm64" \
-            -H "Authorization: Bearer ${API_TOKEN}" \
-            -H "Content-Type: text/plain" \
-            --data "${ARM64_HASH}"
-          
-          # Upload full metadata for simplestream
-          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/metadata:${PRODUCT_AMD64}" \
+          # Upload product metadata (unified format - replaces old backward-compatible entries)
+          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/${PRODUCT_AMD64}" \
             -H "Authorization: Bearer ${API_TOKEN}" \
             -H "Content-Type: application/json" \
             --data "${AMD64_METADATA}"
           
-          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/metadata:${PRODUCT_ARM64}" \
+          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/${PRODUCT_ARM64}" \
             -H "Authorization: Bearer ${API_TOKEN}" \
             -H "Content-Type: application/json" \
             --data "${ARM64_METADATA}"
           
-          # Get existing products list and update it
-          # Cloudflare KV API GET returns: {"result": "value", "success": true, ...}
-          # If key doesn't exist: {"result": null, "success": true, ...}
+          # Update products list (lightweight array of product keys, just strings)
+          # This list is small - each entry is just a string like "product:talos:v1.12.0:amd64:default"
           PRODUCTS_RESPONSE=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/products:list" \
             -H "Authorization: Bearer ${API_TOKEN}")
           
-          # Extract the actual value from API response, default to empty array if null or missing
-          EXISTING_PRODUCTS=$(echo "${PRODUCTS_RESPONSE}" | jq -r '.result // "[]"')
-          
-          # Validate JSON format (result might be a JSON string that needs parsing)
-          if echo "${EXISTING_PRODUCTS}" | jq -e 'type == "string"' >/dev/null 2>&1; then
-            # If result is a JSON string, parse it
-            EXISTING_PRODUCTS=$(echo "${EXISTING_PRODUCTS}" | jq -r '.')
+          # Check if API call succeeded
+          if ! echo "${PRODUCTS_RESPONSE}" | jq -e '.success == true' >/dev/null 2>&1; then
+            echo "Warning: Failed to fetch products list from KV, using empty array"
+            EXISTING_PRODUCTS="[]"
+          else
+            # Extract the result field (KV stores JSON as a string, so result is a JSON string)
+            # If result is null or missing, default to empty array
+            RESULT_VALUE=$(echo "${PRODUCTS_RESPONSE}" | jq -r '.result // "[]"')
+            
+            # If result is the literal string "null", treat as empty
+            if [ "${RESULT_VALUE}" = "null" ]; then
+              EXISTING_PRODUCTS="[]"
+            else
+              EXISTING_PRODUCTS="${RESULT_VALUE}"
+            fi
           fi
           
-          # Final validation - ensure it's a valid JSON array
+          # Validate it's a valid JSON array
           if ! echo "${EXISTING_PRODUCTS}" | jq -e 'type == "array"' >/dev/null 2>&1; then
-            echo "Warning: Invalid or missing products list, resetting to empty array"
+            echo "Warning: Invalid products list format, resetting to empty array"
+            echo "  Received: ${EXISTING_PRODUCTS:0:100}..."
             EXISTING_PRODUCTS="[]"
           fi
           
           # Add new products if not already present (idempotent)
+          # Product keys format: product:talos:{version}:{arch}:{variant}
           UPDATED_PRODUCTS=$(echo "${EXISTING_PRODUCTS}" | jq --arg p1 "${PRODUCT_AMD64}" --arg p2 "${PRODUCT_ARM64}" \
             'if index($p1) == null then . + [$p1] else . end | if index($p2) == null then . + [$p2] else . end')
           
