@@ -5,9 +5,10 @@ VERSION="${1:-v1.12.0}"
 ARCH="${2:-amd64}"
 
 BASE_URL="https://github.com/siderolabs/talos/releases/download/${VERSION}"
-WORK_DIR="$(pwd)/build-${ARCH}"
+ORIG_DIR="$(pwd)"
+WORK_DIR="${ORIG_DIR}/build-${ARCH}"
 RAW_FILE="${WORK_DIR}/metal-${ARCH}.raw.zst"
-METADATA_FILE="incus-${ARCH}.tar.xz"
+METADATA_TARBALL="incus-${ARCH}.tar.xz"
 DISK_FILE="disk-${ARCH}.qcow2"
 
 echo "Creating split-format Talos image for ${ARCH} (${VERSION})..."
@@ -32,8 +33,8 @@ qemu-img convert -f raw -O qcow2 "${RAW_DECOMPRESSED}" "${QCOW2_FILE}"
 
 # Step 4: Create metadata.yaml
 echo "Step 4: Creating metadata.yaml..."
-METADATA_FILE="${WORK_DIR}/metadata.yaml"
-cat > "${METADATA_FILE}" <<EOF
+METADATA_YAML="${WORK_DIR}/metadata.yaml"
+cat > "${METADATA_YAML}" <<EOF
 architecture: "${ARCH}"
 creation_date: $(date +%s)
 properties:
@@ -48,18 +49,17 @@ EOF
 
 # Step 5: Create metadata tarball (metadata.yaml only, ~1KB)
 echo "Step 5: Creating metadata tarball..."
-cd "${WORK_DIR}"
-tar -cJf "../${METADATA_FILE}" "metadata.yaml"
+tar -cJf "${ORIG_DIR}/${METADATA_TARBALL}" "metadata.yaml"
 
 # Step 6: Copy disk image (qcow2 format for VM images)
 echo "Step 6: Preparing disk image..."
-cp "${QCOW2_FILE}" "../${DISK_FILE}"
+cp "${QCOW2_FILE}" "${ORIG_DIR}/${DISK_FILE}"
 
 # Cleanup
-cd ..
+cd "${ORIG_DIR}"
 rm -rf "${WORK_DIR}"
 
 echo ""
 echo "✓ Successfully created split-format images:"
-echo "  Metadata: ${METADATA_FILE} ($(du -h ${METADATA_FILE} | cut -f1))"
+echo "  Metadata: ${METADATA_TARBALL} ($(du -h ${METADATA_TARBALL} | cut -f1))"
 echo "  Disk: ${DISK_FILE} ($(du -h ${DISK_FILE} | cut -f1))"

@@ -268,7 +268,7 @@ jobs:
           API_TOKEN="${{ secrets.CLOUDFLARE_API_TOKEN }}"
           ACCOUNT_ID="${{ secrets.CLOUDFLARE_ACCOUNT_ID }}"
           
-          # Upload product metadata (unified format - replaces old backward-compatible entries)
+          # Upload product metadata
           curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/${PRODUCT_AMD64}" \
             -H "Authorization: Bearer ${API_TOKEN}" \
             -H "Content-Type: application/json" \
