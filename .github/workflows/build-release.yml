@@ -236,8 +236,9 @@ jobs:
             exit 1
           fi
           
+          PRODUCT_COUNT=$(echo "${UPDATED_PRODUCTS}" | jq '. | length')
           echo "Products list updated:"
-          echo "${UPDATED_PRODUCTS}" | jq '. | length' | xargs echo "  Total products:"
+          echo "  Total products: ${PRODUCT_COUNT}"
           
           # Upload the updated products list
           PUT_RESPONSE=$(curl -s -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/products:list" \
