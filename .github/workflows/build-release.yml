@@ -2,8 +2,8 @@ name: Build and Release Talos Unified Images
 
 on:
   push:
-    branches:
-      - 'renovate/siderolabs-talos-*'
+    # branches:
+    #   - 'renovate/siderolabs-talos-*'
 
 jobs:
   build-and-release:
@@ -19,7 +19,7 @@ jobs:
       - name: Set up build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y zstd qemu-utils tar gzip curl gnupg
+          sudo apt-get install -y zstd qemu-utils tar gzip curl gnupg jq
 
       - name: Build unified images
         run: |
@@ -42,16 +42,24 @@ jobs:
           echo "✓ Both artifacts verified:"
           ls -lh incus-*.tar.gz
 
-      - name: Calculate SHA256 hashes
+      - name: Calculate SHA256 hashes and sizes
         id: hashes
         run: |
           AMD64_HASH=$(sha256sum incus-amd64.tar.gz | cut -d' ' -f1)
           ARM64_HASH=$(sha256sum incus-arm64.tar.gz | cut -d' ' -f1)
+          AMD64_SIZE=$(stat -c%s incus-amd64.tar.gz)
+          ARM64_SIZE=$(stat -c%s incus-arm64.tar.gz)
+          CREATION_DATE=$(date +%s)
+          
           echo "amd64_hash=${AMD64_HASH}" >> $GITHUB_OUTPUT
           echo "arm64_hash=${ARM64_HASH}" >> $GITHUB_OUTPUT
-          echo "✓ Hashes calculated:"
-          echo "  AMD64: ${AMD64_HASH}"
-          echo "  ARM64: ${ARM64_HASH}"
+          echo "amd64_size=${AMD64_SIZE}" >> $GITHUB_OUTPUT
+          echo "arm64_size=${ARM64_SIZE}" >> $GITHUB_OUTPUT
+          echo "creation_date=${CREATION_DATE}" >> $GITHUB_OUTPUT
+          
+          echo "✓ Hashes and sizes calculated:"
+          echo "  AMD64: ${AMD64_HASH} (${AMD64_SIZE} bytes)"
+          echo "  ARM64: ${ARM64_HASH} (${ARM64_SIZE} bytes)"
 
       - name: Import GPG key
         run: |
@@ -100,16 +108,21 @@ jobs:
           echo "namespace_id=$NAMESPACE_ID" >> $GITHUB_OUTPUT
           echo "✓ Found KV namespace '$NAMESPACE_NAME' with ID: $NAMESPACE_ID"
 
-      - name: Upload hashes to Cloudflare KV
+      - name: Upload metadata to Cloudflare KV
         run: |
-          # Upload hashes to KV store
-          # Key format: {repo}:{version}:{arch}
-          # Example: talos-incus:v1.12.0:amd64
+          # Upload metadata to KV store for simplestream support
+          # Key formats:
+          #   - {repo}:{version}:{arch} -> hash (backward compatible)
+          #   - metadata:talos:{version}:{arch}:default -> full metadata JSON
+          #   - products:list -> list of all product keys
           REPO="talos-incus"
           
           # Trim whitespace and verify hash format (64 hex chars)
           AMD64_HASH=$(echo "${{ steps.hashes.outputs.amd64_hash }}" | tr -d '[:space:]')
           ARM64_HASH=$(echo "${{ steps.hashes.outputs.arm64_hash }}" | tr -d '[:space:]')
+          AMD64_SIZE="${{ steps.hashes.outputs.amd64_size }}"
+          ARM64_SIZE="${{ steps.hashes.outputs.arm64_size }}"
+          CREATION_DATE="${{ steps.hashes.outputs.creation_date }}"
           
           if [ ${#AMD64_HASH} -ne 64 ] || [ ${#ARM64_HASH} -ne 64 ]; then
             echo "Error: Invalid hash length (expected 64 hex characters)"
@@ -118,21 +131,81 @@ jobs:
             exit 1
           fi
           
-          echo "Uploading hashes to KV:"
-          echo "  AMD64: ${AMD64_HASH}"
-          echo "  ARM64: ${ARM64_HASH}"
+          # Product keys for simplestream
+          PRODUCT_AMD64="talos:${TALOS_VERSION}:amd64:default"
+          PRODUCT_ARM64="talos:${TALOS_VERSION}:arm64:default"
           
-          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/storage/kv/namespaces/${{ steps.kv_namespace.outputs.namespace_id }}/values/${REPO}:${TALOS_VERSION}:amd64" \
-            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+          # Create metadata JSON for each architecture
+          AMD64_METADATA=$(jq -n \
+            --arg hash "${AMD64_HASH}" \
+            --arg size "${AMD64_SIZE}" \
+            --arg date "${CREATION_DATE}" \
+            '{hash: $hash, size: ($size | tonumber), creation_date: $date}')
+          
+          ARM64_METADATA=$(jq -n \
+            --arg hash "${ARM64_HASH}" \
+            --arg size "${ARM64_SIZE}" \
+            --arg date "${CREATION_DATE}" \
+            '{hash: $hash, size: ($size | tonumber), creation_date: $date}')
+          
+          echo "Uploading metadata to KV:"
+          echo "  AMD64: ${AMD64_HASH} (${AMD64_SIZE} bytes)"
+          echo "  ARM64: ${ARM64_HASH} (${ARM64_SIZE} bytes)"
+          
+          NAMESPACE_ID="${{ steps.kv_namespace.outputs.namespace_id }}"
+          API_TOKEN="${{ secrets.CLOUDFLARE_API_TOKEN }}"
+          ACCOUNT_ID="${{ secrets.CLOUDFLARE_ACCOUNT_ID }}"
+          
+          # Upload hashes (backward compatible)
+          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/${REPO}:${TALOS_VERSION}:amd64" \
+            -H "Authorization: Bearer ${API_TOKEN}" \
             -H "Content-Type: text/plain" \
             --data "${AMD64_HASH}"
           
-          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/storage/kv/namespaces/${{ steps.kv_namespace.outputs.namespace_id }}/values/${REPO}:${TALOS_VERSION}:arm64" \
-            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/${REPO}:${TALOS_VERSION}:arm64" \
+            -H "Authorization: Bearer ${API_TOKEN}" \
             -H "Content-Type: text/plain" \
             --data "${ARM64_HASH}"
           
-          echo "✓ Hashes uploaded to Cloudflare KV"
+          # Upload full metadata for simplestream
+          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/metadata:${PRODUCT_AMD64}" \
+            -H "Authorization: Bearer ${API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data "${AMD64_METADATA}"
+          
+          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/metadata:${PRODUCT_ARM64}" \
+            -H "Authorization: Bearer ${API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data "${ARM64_METADATA}"
+          
+          # Get existing products list and update it
+          EXISTING_PRODUCTS=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/products:list" \
+            -H "Authorization: Bearer ${API_TOKEN}" || echo "[]")
+          
+          # Validate and normalize existing products list
+          if [ "$EXISTING_PRODUCTS" = "null" ] || [ -z "$EXISTING_PRODUCTS" ]; then
+            EXISTING_PRODUCTS="[]"
+          fi
+          
+          # Validate JSON format
+          if ! echo "${EXISTING_PRODUCTS}" | jq . >/dev/null 2>&1; then
+            echo "Warning: Invalid JSON in existing products list, resetting to empty array"
+            EXISTING_PRODUCTS="[]"
+          fi
+          
+          # Add new products if not already present (idempotent)
+          UPDATED_PRODUCTS=$(echo "${EXISTING_PRODUCTS}" | jq --arg p1 "${PRODUCT_AMD64}" --arg p2 "${PRODUCT_ARM64}" \
+            'if index($p1) == null then . + [$p1] else . end | if index($p2) == null then . + [$p2] else . end')
+          
+          echo "Products list updated:"
+          echo "${UPDATED_PRODUCTS}" | jq '. | length' | xargs echo "  Total products:"
+          
+          curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/products:list" \
+            -H "Authorization: Bearer ${API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data "${UPDATED_PRODUCTS}"
+          
+          echo "✓ Metadata uploaded to Cloudflare KV"
 
       - name: Create GitHub Release
         run: |
