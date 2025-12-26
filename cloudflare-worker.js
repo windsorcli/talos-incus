@@ -51,22 +51,26 @@ async function getAllImageMetadata(env) {
   const products = await getAllProducts(env);
   const images = {};
   
-  for (const productKey of products) {
-    // Product key format: product:talos:{version}:{arch}:{variant}
-    const parts = productKey.split(':');
+  for (const kvProductKey of products) {
+    // KV key format: product:talos:{version}:{arch}:{variant}
+    // Simplestreams key format: talos:{version}:{arch}:{variant} (no "product:" prefix)
+    const parts = kvProductKey.split(':');
     if (parts.length !== 5 || parts[0] !== 'product') continue;
     
     const [prefix, os, version, arch, variant] = parts;
     
-    // Get metadata for this product (key is already in correct format)
-    const metadataJson = await env.IMAGE_HASHES.get(productKey);
+    // Get metadata for this product from KV
+    const metadataJson = await env.IMAGE_HASHES.get(kvProductKey);
     
     if (metadataJson) {
       try {
         const metadata = JSON.parse(metadataJson);
         
-        if (!images[productKey]) {
-          images[productKey] = {
+        // Simplestreams product key (without "product:" prefix)
+        const simplestreamsKey = `${os}:${version}:${arch}:${variant}`;
+        
+        if (!images[simplestreamsKey]) {
+          images[simplestreamsKey] = {
             aliases: `talos/${version}/${arch}/${variant},talos/${version}/${arch}`,
             arch: arch,
             os: 'Talos',
@@ -88,7 +92,7 @@ async function getAllImageMetadata(env) {
         const minutes = String(date.getUTCMinutes()).padStart(2, '0');
         const versionKey = `${year}${month}${day}_${hours}:${minutes}`;
         
-        images[productKey].versions[versionKey] = {
+        images[simplestreamsKey].versions[versionKey] = {
           items: {
             'incus.tar.gz': {
               ftype: 'incus.tar.gz',
@@ -101,7 +105,7 @@ async function getAllImageMetadata(env) {
           }
         };
       } catch (e) {
-        console.error(`Failed to parse metadata for ${productKey}:`, e);
+        console.error(`Failed to parse metadata for ${kvProductKey}:`, e);
       }
     }
   }
@@ -125,7 +129,17 @@ async function getAllImageMetadata(env) {
  * @returns {Promise<Response>} JSON response with index structure
  */
 async function handleIndex(env) {
-  const products = await getAllProducts(env);
+  const kvProducts = await getAllProducts(env);
+  
+  // Convert KV product keys (product:talos:...) to simplestreams format (talos:...)
+  const simplestreamsProducts = kvProducts.map(kvKey => {
+    const parts = kvKey.split(':');
+    if (parts.length === 5 && parts[0] === 'product') {
+      // Remove "product:" prefix: product:talos:v1.12.0:amd64:default -> talos:v1.12.0:amd64:default
+      return parts.slice(1).join(':');
+    }
+    return null;
+  }).filter(Boolean);
   
   const index = {
     index: {
@@ -133,7 +147,7 @@ async function handleIndex(env) {
         datatype: 'image-downloads',
         path: 'streams/v1/images.json',
         format: 'products:1.0',
-        products: products
+        products: simplestreamsProducts
       }
     },
     format: 'index:1.0'
