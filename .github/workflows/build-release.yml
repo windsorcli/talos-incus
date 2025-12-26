@@ -179,17 +179,23 @@ jobs:
             --data "${ARM64_METADATA}"
           
           # Get existing products list and update it
-          EXISTING_PRODUCTS=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/products:list" \
-            -H "Authorization: Bearer ${API_TOKEN}" || echo "[]")
+          # Cloudflare KV API GET returns: {"result": "value", "success": true, ...}
+          # If key doesn't exist: {"result": null, "success": true, ...}
+          PRODUCTS_RESPONSE=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/products:list" \
+            -H "Authorization: Bearer ${API_TOKEN}")
           
-          # Validate and normalize existing products list
-          if [ "$EXISTING_PRODUCTS" = "null" ] || [ -z "$EXISTING_PRODUCTS" ]; then
-            EXISTING_PRODUCTS="[]"
+          # Extract the actual value from API response, default to empty array if null or missing
+          EXISTING_PRODUCTS=$(echo "${PRODUCTS_RESPONSE}" | jq -r '.result // "[]"')
+          
+          # Validate JSON format (result might be a JSON string that needs parsing)
+          if echo "${EXISTING_PRODUCTS}" | jq -e 'type == "string"' >/dev/null 2>&1; then
+            # If result is a JSON string, parse it
+            EXISTING_PRODUCTS=$(echo "${EXISTING_PRODUCTS}" | jq -r '.')
           fi
           
-          # Validate JSON format
-          if ! echo "${EXISTING_PRODUCTS}" | jq . >/dev/null 2>&1; then
-            echo "Warning: Invalid JSON in existing products list, resetting to empty array"
+          # Final validation - ensure it's a valid JSON array
+          if ! echo "${EXISTING_PRODUCTS}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+            echo "Warning: Invalid or missing products list, resetting to empty array"
             EXISTING_PRODUCTS="[]"
           fi
           
