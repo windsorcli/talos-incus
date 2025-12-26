@@ -190,9 +190,16 @@ jobs:
           
           # Update products list (lightweight array of product keys, just strings)
           # This list is small - each entry is just a string like "product:talos:v1.12.0:amd64:default"
+          set +e
           PRODUCTS_RESPONSE=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/products:list" \
             -H "Authorization: Bearer ${API_TOKEN}" \
-            -H "Content-Type: application/json" 2>&1) || true
+            -H "Content-Type: application/json" 2>&1)
+          CURL_EXIT=$?
+          set -e
+          
+          if [ ${CURL_EXIT} -ne 0 ] || [ -z "${PRODUCTS_RESPONSE}" ]; then
+            PRODUCTS_RESPONSE=""
+          fi
           
           # Initialize with empty array as default
           EXISTING_PRODUCTS="[]"
@@ -236,7 +243,7 @@ jobs:
             exit 1
           fi
           
-          PRODUCT_COUNT=$(echo "${UPDATED_PRODUCTS}" | jq '. | length')
+          PRODUCT_COUNT=$(echo "${UPDATED_PRODUCTS}" | jq -r '. | length' 2>/dev/null || echo "0")
           echo "Products list updated:"
           echo "  Total products: ${PRODUCT_COUNT}"
           
@@ -255,38 +262,38 @@ jobs:
           
           echo "✓ Metadata uploaded to Cloudflare KV"
 
-          - name: Create GitHub Release
-            run: |
-              # Build file list for release
-              RELEASE_FILES=("incus-amd64.tar.xz" "incus-arm64.tar.xz" "incus-amd64.tar.xz.asc" "incus-arm64.tar.xz.asc")
-              
-              NOTES="Automated release of Talos OS unified images for Incus.
-              
-              **Version:** ${TALOS_VERSION}
-              
-              **Architectures:**
-              - amd64 (x86_64)
-              - arm64 (aarch64)
-              
-              **Usage:**
-              
-              **AMD64:**
-              \`\`\`bash
-              incus image import https://images.windsorcli.dev/talos-incus/${TALOS_VERSION}/incus-amd64.tar.xz --alias talos-${TALOS_VERSION}-amd64
-              incus launch talos-${TALOS_VERSION}-amd64 my-talos-instance
-              \`\`\`
-              
-              **ARM64:**
-              \`\`\`bash
-              incus image import https://images.windsorcli.dev/talos-incus/${TALOS_VERSION}/incus-arm64.tar.xz --alias talos-${TALOS_VERSION}-arm64
-              incus launch talos-${TALOS_VERSION}-arm64 my-talos-instance
-              \`\`\`
-              
-              **Verification:**
-              \`\`\`bash
-              gpg --verify incus-amd64.tar.xz.asc incus-amd64.tar.xz
-              gpg --verify incus-arm64.tar.xz.asc incus-arm64.tar.xz
-              \`\`\`"
+      - name: Create GitHub Release
+        run: |
+          # Build file list for release
+          RELEASE_FILES=("incus-amd64.tar.xz" "incus-arm64.tar.xz" "incus-amd64.tar.xz.asc" "incus-arm64.tar.xz.asc")
+          
+          NOTES="Automated release of Talos OS unified images for Incus.
+          
+          **Version:** ${TALOS_VERSION}
+          
+          **Architectures:**
+          - amd64 (x86_64)
+          - arm64 (aarch64)
+          
+          **Usage:**
+          
+          **AMD64:**
+          \`\`\`bash
+          incus image import https://images.windsorcli.dev/talos-incus/${TALOS_VERSION}/incus-amd64.tar.xz --alias talos-${TALOS_VERSION}-amd64
+          incus launch talos-${TALOS_VERSION}-amd64 my-talos-instance
+          \`\`\`
+          
+          **ARM64:**
+          \`\`\`bash
+          incus image import https://images.windsorcli.dev/talos-incus/${TALOS_VERSION}/incus-arm64.tar.xz --alias talos-${TALOS_VERSION}-arm64
+          incus launch talos-${TALOS_VERSION}-arm64 my-talos-instance
+          \`\`\`
+          
+          **Verification:**
+          \`\`\`bash
+          gpg --verify incus-amd64.tar.xz.asc incus-amd64.tar.xz
+          gpg --verify incus-arm64.tar.xz.asc incus-arm64.tar.xz
+          \`\`\`"
           
           gh release create "${TALOS_VERSION}" \
             --title "Talos ${TALOS_VERSION}" \
