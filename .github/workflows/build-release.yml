@@ -246,6 +246,7 @@ jobs:
           gh release create "${TALOS_VERSION}" \
             --title "Talos ${TALOS_VERSION}" \
             --notes "${NOTES}" \
+            --latest \
             "${RELEASE_FILES[@]}"
         env:
           GH_TOKEN: ${{ github.token }}
