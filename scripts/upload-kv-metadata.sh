@@ -70,10 +70,14 @@ if [ -n "${PRODUCTS_RESPONSE}" ] && echo "${PRODUCTS_RESPONSE}" | jq -e '.succes
   # Example: {"success": true, "result": "[\"product:talos:v1.11.6:amd64:default\"]"}
   RESULT_VALUE=$(echo "${PRODUCTS_RESPONSE}" | jq -r '.result // empty' 2>/dev/null || echo "")
   if [ -n "${RESULT_VALUE}" ] && [ "${RESULT_VALUE}" != "null" ]; then
-    # The result is always a JSON string, so parse it
-    PARSED=$(echo "${RESULT_VALUE}" | jq -e '.' 2>/dev/null || echo "[]")
-    if echo "${PARSED}" | jq -e 'type == "array"' >/dev/null 2>&1; then
-      EXISTING_PRODUCTS="${PARSED}"
+    # Try to parse the result. It is usually a JSON string (array encoded as string), but might be an actual array.
+    if echo "${RESULT_VALUE}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+      EXISTING_PRODUCTS="${RESULT_VALUE}"
+    elif echo "${RESULT_VALUE}" | jq -e 'type == "string"' >/dev/null 2>&1; then
+      PARSED=$(echo "${RESULT_VALUE}" | jq -r 'fromjson?' 2>/dev/null || echo "[]")
+      if echo "${PARSED}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        EXISTING_PRODUCTS="${PARSED}"
+      fi
     fi
   fi
 fi
@@ -83,8 +87,6 @@ if ! echo "${EXISTING_PRODUCTS}" | jq -e 'type == "array"' >/dev/null 2>&1; then
   echo "Warning: Existing products list is invalid, starting with empty array"
   EXISTING_PRODUCTS="[]"
 fi
-
-echo "Existing products: $(echo "${EXISTING_PRODUCTS}" | jq -c '.')"
 
 # Merge new product keys idempotently (only add if not already present)
 # Convert PRODUCT_KEYS array to JSON array for jq processing
