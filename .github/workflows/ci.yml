@@ -51,6 +51,8 @@ jobs:
           echo "Verifying bundle signature..."
           cosign verify-blob \
             --bundle "${BUNDLE_FILE}" \
+            --certificate-identity-regexp '^https://github.com/siderolabs/talos' \
+            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
             "${RAW_FILE}"
           echo "✓ Bundle signature verified"
 
