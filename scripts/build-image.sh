@@ -67,11 +67,11 @@ properties:
 templates: {}
 EOF
 
-# Step 7: Create metadata tarball (metadata.yaml only, ~1KB)
+# Step 7: Create metadata tarball
 echo "Step 7: Creating metadata tarball..."
 tar -cJf "${ORIG_DIR}/${METADATA_TARBALL}" "metadata.yaml"
 
-# Step 8: Copy disk image (qcow2 format for VM images)
+# Step 8: Copy disk image
 echo "Step 8: Preparing disk image..."
 cp "${QCOW2_FILE}" "${ORIG_DIR}/${DISK_FILE}"
 
@@ -81,5 +81,5 @@ rm -rf "${WORK_DIR}"
 
 echo ""
 echo "✓ Successfully created split-format images:"
-echo "  Metadata: ${METADATA_TARBALL} ($(du -h ${METADATA_TARBALL} | cut -f1))"
-echo "  Disk: ${DISK_FILE} ($(du -h ${DISK_FILE} | cut -f1))"
+echo "  Metadata: ${METADATA_TARBALL} ($(du -h "${METADATA_TARBALL}" | cut -f1))"
+echo "  Disk: ${DISK_FILE} ($(du -h "${DISK_FILE}" | cut -f1))"

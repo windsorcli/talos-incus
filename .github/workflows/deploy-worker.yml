@@ -2,8 +2,8 @@ name: Deploy Cloudflare Worker
 
 on:
   push:
-    # branches:
-    #   - main
+    branches:
+      - main
     paths:
       - 'cloudflare-worker.js'
       - 'wrangler.toml.template'
