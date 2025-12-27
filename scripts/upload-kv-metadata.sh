@@ -66,19 +66,14 @@ set -e
 
 EXISTING_PRODUCTS="[]"
 if [ -n "${PRODUCTS_RESPONSE}" ] && echo "${PRODUCTS_RESPONSE}" | jq -e '.success == true' >/dev/null 2>&1; then
-  # Cloudflare KV API returns the value in .result field
-  # The value is stored as a JSON string, so we need to extract and parse it
+  # Cloudflare KV API returns the value in .result field as a JSON-encoded string
+  # Example: {"success": true, "result": "[\"product:talos:v1.11.6:amd64:default\"]"}
   RESULT_VALUE=$(echo "${PRODUCTS_RESPONSE}" | jq -r '.result // empty' 2>/dev/null || echo "")
   if [ -n "${RESULT_VALUE}" ] && [ "${RESULT_VALUE}" != "null" ]; then
-    # Try to parse as JSON - if it fails, the value might be a JSON string that needs parsing
-    if echo "${RESULT_VALUE}" | jq -e 'type == "array"' >/dev/null 2>&1; then
-      EXISTING_PRODUCTS="${RESULT_VALUE}"
-    elif echo "${RESULT_VALUE}" | jq -e 'type == "string"' >/dev/null 2>&1; then
-      # If it's a JSON string, parse it
-      PARSED=$(echo "${RESULT_VALUE}" | jq -r 'fromjson?' 2>/dev/null || echo "[]")
-      if echo "${PARSED}" | jq -e 'type == "array"' >/dev/null 2>&1; then
-        EXISTING_PRODUCTS="${PARSED}"
-      fi
+    # The result is always a JSON string, so parse it
+    PARSED=$(echo "${RESULT_VALUE}" | jq -e '.' 2>/dev/null || echo "[]")
+    if echo "${PARSED}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+      EXISTING_PRODUCTS="${PARSED}"
     fi
   fi
 fi
@@ -88,6 +83,8 @@ if ! echo "${EXISTING_PRODUCTS}" | jq -e 'type == "array"' >/dev/null 2>&1; then
   echo "Warning: Existing products list is invalid, starting with empty array"
   EXISTING_PRODUCTS="[]"
 fi
+
+echo "Existing products: $(echo "${EXISTING_PRODUCTS}" | jq -c '.')"
 
 # Merge new product keys idempotently (only add if not already present)
 # Convert PRODUCT_KEYS array to JSON array for jq processing
@@ -110,5 +107,5 @@ curl -s -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/stor
   -H "Content-Type: application/json" \
   --data "${UPDATED_PRODUCTS}"
 
-echo "✓ Updated products list"
+echo "✓ Updated products list with $(echo "${UPDATED_PRODUCTS}" | jq 'length') products"
 
