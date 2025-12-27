@@ -30,7 +30,7 @@ jobs:
       - name: Set up build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y zstd qemu-utils tar xz-utils curl gnupg jq
+          sudo apt-get install -y zstd qemu-utils tar xz-utils curl jq
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
@@ -116,12 +116,16 @@ jobs:
       github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
+      id-token: write
     env:
       TALOS_VERSION: ${{ github.event.inputs.version || 'v1.12.0' }} # renovate: datasource=github-tags depName=siderolabs/talos
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
 
       - name: Check if release exists
         id: check_release
@@ -157,20 +161,10 @@ jobs:
           echo "arches=$(IFS=,; echo "${UNIQUE_ARCHES[*]}")" >> $GITHUB_OUTPUT
           echo "Found architectures: ${UNIQUE_ARCHES[*]}"
 
-      - name: Import GPG key
-        if: steps.check_release.outputs.exists == 'false'
-        run: |
-          echo "${{ secrets.GPG_PRIVATE_KEY }}" | base64 -d | gpg --batch --import
-          gpg --list-secret-keys --keyid-format LONG
-        env:
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-
       - name: Sign artifacts
         if: steps.check_release.outputs.exists == 'false'
         run: |
-          ./scripts/sign-artifacts.sh "${{ steps.arches.outputs.arches }}" "${{ secrets.GPG_PASSPHRASE }}"
-        env:
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          ./scripts/sign-artifacts.sh "${{ steps.arches.outputs.arches }}"
 
       - name: Look up KV namespace ID by name
         if: steps.check_release.outputs.exists == 'false'
