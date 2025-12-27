@@ -13,7 +13,7 @@ for arch in "${ARCH_ARRAY[@]}"; do
   RELEASE_FILES+=("talos-${arch}.qcow2")
   RELEASE_FILES+=("talos-${arch}-incus.tar.xz.bundle")
   RELEASE_FILES+=("talos-${arch}.qcow2.bundle")
-  ARCH_LIST="${ARCH_LIST}- ${arch}\n"
+  ARCH_LIST="${ARCH_LIST}- ${arch}"$'\n'
 done
 
 NOTES="Automated release of Talos OS split-format images for Incus.
