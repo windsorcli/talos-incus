@@ -1,0 +1,109 @@
+name: Build Multiple Versions
+
+on:
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: 'Comma-separated list of Talos versions to build (e.g., v1.10.7,v1.10.8,v1.11.4)'
+        required: true
+        type: string
+
+jobs:
+  trigger-builds:
+    name: Trigger builds for versions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Parse versions
+        id: versions
+        run: |
+          VERSIONS="${{ github.event.inputs.versions }}"
+          # Remove spaces and split by comma
+          VERSIONS=$(echo "$VERSIONS" | tr -d ' ' | tr ',' '\n')
+          
+          # Filter out empty lines and validate format
+          VALID_VERSIONS=()
+          while IFS= read -r version; do
+            if [ -n "$version" ] && [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              VALID_VERSIONS+=("$version")
+            fi
+          done <<< "$VERSIONS"
+          
+          if [ ${#VALID_VERSIONS[@]} -eq 0 ]; then
+            echo "Error: No valid versions provided"
+            exit 1
+          fi
+          
+          # Output as JSON array for matrix
+          printf '%s\n' "${VALID_VERSIONS[@]}" | jq -R . | jq -s . > versions.json
+          echo "versions=$(cat versions.json)" >> $GITHUB_OUTPUT
+          echo "Found ${#VALID_VERSIONS[@]} valid versions:"
+          printf '  - %s\n' "${VALID_VERSIONS[@]}"
+      
+      - name: Check existing releases
+        id: check_releases
+        run: |
+          VERSIONS=$(echo '${{ steps.versions.outputs.versions }}' | jq -r '.[]')
+          EXISTING=()
+          MISSING=()
+          
+          while IFS= read -r version; do
+            if gh release view "$version" >/dev/null 2>&1; then
+              EXISTING+=("$version")
+              echo "✓ $version already exists"
+            else
+              MISSING+=("$version")
+              echo "→ $version needs to be built"
+            fi
+          done <<< "$VERSIONS"
+          
+          if [ ${#MISSING[@]} -eq 0 ]; then
+            echo "All versions already exist!"
+            echo "needs_build=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          printf '%s\n' "${MISSING[@]}" | jq -R . | jq -s . > missing_versions.json
+          echo "missing_versions=$(cat missing_versions.json)" >> $GITHUB_OUTPUT
+          echo "needs_build=true" >> $GITHUB_OUTPUT
+          echo ""
+          echo "Will build ${#MISSING[@]} versions:"
+          printf '  - %s\n' "${MISSING[@]}"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      
+      - name: Trigger CI workflow for each version
+        if: steps.check_releases.outputs.needs_build == 'true'
+        run: |
+          MISSING_VERSIONS=$(echo '${{ steps.check_releases.outputs.missing_versions }}' | jq -r '.[]')
+          
+          while IFS= read -r version; do
+            echo ""
+            echo "Triggering build for $version..."
+            gh workflow run ci.yml \
+              --ref main \
+              -f version="$version" || {
+              echo "⚠️  Failed to trigger workflow for $version"
+              continue
+            }
+            echo "✓ Triggered workflow for $version"
+            
+            # Small delay to avoid rate limiting
+            sleep 1
+          done <<< "$MISSING_VERSIONS"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      
+      - name: Summary
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "Build triggers completed!"
+          echo "=========================================="
+          echo ""
+          echo "Monitor progress at:"
+          echo "https://github.com/${{ github.repository }}/actions"
+          echo ""
+
