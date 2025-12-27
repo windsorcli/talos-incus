@@ -2,9 +2,22 @@
 
 This repository automatically converts [Talos OS](https://www.talos.dev/) disk images into Incus-compatible virtual machine images. Talos is a minimal, immutable Linux distribution designed for Kubernetes, but its official releases don't include Incus/LXD-compatible formats.
 
+> **⚠️ Caution: Not an Authoritative Source**
+>
+> This image source is a community-driven project and is **not maintained or endorsed by SideroLabs or the Talos OS team**. Although we strive to provide accurate and timely images, **they are provided on a "best effort" basis and are not guaranteed for production use**.
+>
+> **Do NOT use these images in critical or production environments.** They are intended only for development, testing, or personal experimentation until an official simplestreams (or LXD/Incus) image source is made available by Talos OS or Incus.
+>
+> If and when an officially supported source for Incus images becomes available, you should migrate to that.
+>
+---
 ## What This Repository Does
 
 This repository sets up a simplestreams server that distributes Talos OS images for Incus. It automatically converts Talos releases into Incus-compatible VM images, signs them with cosign, and serves them via a Cloudflare Worker at `images.windsorcli.dev`.
+
+> **Missing a version you need?**
+>
+> If there is a Talos OS version you want, but it isn't available through this repository or `images.windsorcli.dev`, please [file an issue](https://github.com/windsorcli/talos-incus/issues). Missing image versions can be built and published quickly upon request.
 
 ## Usage
 
@@ -13,11 +26,28 @@ This repository sets up a simplestreams server that distributes Talos OS images 
 incus remote add windsor https://images.windsorcli.dev --protocol simplestreams
 incus image list windsor:
 incus launch windsor:talos/v1.12.0/amd64 my-instance
+```
 
-# Or import split format files directly from GitHub releases
-# Note: You need both the metadata and disk files
-incus image import talos-amd64-incus.tar.xz talos-amd64.qcow2 --alias talos-v1.12.0-amd64
-incus launch talos-v1.12.0-amd64 my-instance
+If you are using the Incus Terraform provider, you can add remotes in the `provider` block:
+
+```
+# Configure Incus provider with remotes for image pulls
+provider "incus" {
+  remote {
+    name     = "windsor"
+    address  = "https://images.windsorcli.dev"
+    protocol = "simplestreams"
+    public   = true
+  }
+}
+
+resource "incus_instance" "talos_controller" {
+  name        = "talos-controller"
+  description = "Talos control plane node"
+  type        = "virtual-machine"
+  image       = "windsor:talos/v1.12.0/arm64"
+  ...
+}
 ```
 
 ## How It Works
@@ -40,7 +70,7 @@ Incus requires specific HTTP headers (`Incus-Image-Hash`, `Incus-Image-URL`) whe
 
 ## Signing
 
-Releases are signed with [cosign](https://github.com/sigstore/cosign) using OIDC keyless signing (same as upstream Talos). Signatures are created using the GitHub Actions workflow identity and stored in bundle format.
+Releases are signed with [cosign](https://github.com/sigstore/cosign) using OIDC keyless signing. Signatures are created using the GitHub Actions workflow identity and stored in bundle format.
 
 **Verify Signatures:**
 
