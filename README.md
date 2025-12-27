@@ -4,7 +4,7 @@ This repository automatically converts [Talos OS](https://www.talos.dev/) disk i
 
 ## What This Repository Does
 
-This repository sets up a simplestreams server that distributes Talos OS images for Incus. It automatically converts Talos releases into Incus-compatible VM images, signs them with GPG, and serves them via a Cloudflare Worker at `images.windsorcli.dev`. When Talos releases a new version, this repo automatically builds and publishes the Incus-compatible images.
+This repository sets up a simplestreams server that distributes Talos OS images for Incus. It automatically converts Talos releases into Incus-compatible VM images, signs them with cosign, and serves them via a Cloudflare Worker at `images.windsorcli.dev`.
 
 ## Usage
 
@@ -26,7 +26,7 @@ This repository automatically builds Incus images directly from [Talos OS releas
 
 - Downloads the official Talos disk images from `siderolabs/talos`
 - Converts them to split-format Incus images (metadata + disk files)
-- Signs all files with GPG
+- Signs all files with cosign (OIDC keyless)
 - Releases them here
 
 ### Cloudflare Worker Proxy
@@ -40,30 +40,49 @@ Incus requires specific HTTP headers (`Incus-Image-Hash`, `Incus-Image-URL`) whe
 
 ## Signing
 
-Releases are signed with GPG for verification.
-
-**Public Key:**
-- **Fingerprint**: `C398 9FD8 F4E4 F1DE B911 5A13 9F45 D7E6 57E6 6BC0`
-- **Key ID**: `9F45D7E657E66BC0`
-- **Email**: `windsor-release-managers@googlegroups.com`
+Releases are signed with [cosign](https://github.com/sigstore/cosign) using OIDC keyless signing (same as upstream Talos). Signatures are created using the GitHub Actions workflow identity and stored in bundle format.
 
 **Verify Signatures:**
 
-1. Import the public key:
+1. Install cosign:
    ```bash
-   gpg --keyserver keys.openpgp.org --recv-keys 9F45D7E657E66BC0
+   # macOS
+   brew install cosign
+   
+   # Linux
+   wget -O cosign https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64
+   chmod +x cosign
+   sudo mv cosign /usr/local/bin/
    ```
 
-2. Download the signature file from the release (`.asc` file)
+2. Download the artifact and bundle file from the release
 
 3. Verify metadata files:
    ```bash
-   gpg --verify talos-amd64-incus.tar.xz.asc talos-amd64-incus.tar.xz
-   gpg --verify talos-arm64-incus.tar.xz.asc talos-arm64-incus.tar.xz
+   cosign verify-blob \
+     --bundle talos-amd64-incus.tar.xz.bundle \
+     --certificate-identity-regexp '^https://github.com/windsorcli/talos-incus' \
+     --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+     talos-amd64-incus.tar.xz
+   
+   cosign verify-blob \
+     --bundle talos-arm64-incus.tar.xz.bundle \
+     --certificate-identity-regexp '^https://github.com/windsorcli/talos-incus' \
+     --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+     talos-arm64-incus.tar.xz
    ```
 
 4. Verify disk files:
    ```bash
-   gpg --verify talos-amd64.qcow2.asc talos-amd64.qcow2
-   gpg --verify talos-arm64.qcow2.asc talos-arm64.qcow2
+   cosign verify-blob \
+     --bundle talos-amd64.qcow2.bundle \
+     --certificate-identity-regexp '^https://github.com/windsorcli/talos-incus' \
+     --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+     talos-amd64.qcow2
+   
+   cosign verify-blob \
+     --bundle talos-arm64.qcow2.bundle \
+     --certificate-identity-regexp '^https://github.com/windsorcli/talos-incus' \
+     --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+     talos-arm64.qcow2
    ```

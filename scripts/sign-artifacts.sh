@@ -2,24 +2,21 @@
 set -euo pipefail
 
 ARCHES="${1}"
-GPG_PASSPHRASE="${2}"
 
-GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format LONG | grep '^sec' | awk '{print $2}' | cut -d'/' -f2 | head -1)
-echo "Signing with key: ${GPG_KEY_ID}"
+echo "Signing artifacts with cosign (OIDC keyless)"
 
 IFS=',' read -ra ARCH_ARRAY <<< "${ARCHES}"
 for arch in "${ARCH_ARRAY[@]}"; do
   for file in "talos-${arch}-incus.tar.xz" "talos-${arch}.qcow2"; do
     if [ -f "$file" ]; then
-      gpg --batch --yes --detach-sign --armor \
-        --pinentry-mode loopback \
-        --passphrase "${GPG_PASSPHRASE}" \
-        -u "${GPG_KEY_ID}" \
-        -o "${file}.asc" \
+      echo "Signing ${file}..."
+      cosign sign-blob \
+        --yes \
+        --bundle "${file}.bundle" \
         "${file}"
     fi
   done
 done
 
 echo "✓ Signatures created:"
-ls -lh -- ./*.asc
+ls -lh -- ./*.bundle
