@@ -13,20 +13,54 @@ PRODUCT_KEYS=()
 IFS=',' read -ra ARCH_ARRAY <<< "${ARCHES}"
 for arch in "${ARCH_ARRAY[@]}"; do
   META_FILE="talos-${arch}-incus.tar.xz"
-  DISK_FILE="talos-${arch}.qcow2"
   
-  if [ ! -f "${META_FILE}" ] || [ ! -f "${DISK_FILE}" ]; then
-    echo "Error: Missing files for ${arch}"
+  if [ ! -f "${META_FILE}" ]; then
+    echo "Error: Missing metadata file for ${arch}"
     exit 1
   fi
   
   META_HASH=$(sha256sum "${META_FILE}" | cut -d' ' -f1)
-  DISK_HASH=$(sha256sum "${DISK_FILE}" | cut -d' ' -f1)
   META_SIZE=$(stat -c%s "${META_FILE}")
-  DISK_SIZE=$(stat -c%s "${DISK_FILE}")
   
-  cat "${META_FILE}" "${DISK_FILE}" | sha256sum | cut -d' ' -f1 > /tmp/combined_hash
+  # Fetch qcow2 info from Talos image factory
+  # URL pattern: https://factory.talos.dev/image/{schematic_id}/{version}/metal-{arch}.qcow2
+  # Default schematic ID for vanilla Talos: 376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba
+  TALOS_SCHEMATIC_ID="${TALOS_SCHEMATIC_ID:-376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba}"
+  # Version can be with or without 'v' prefix
+  FACTORY_VERSION="${TALOS_VERSION}"
+  if [[ ! "${FACTORY_VERSION}" =~ ^v ]]; then
+    FACTORY_VERSION="v${FACTORY_VERSION}"
+  fi
+  TALOS_FACTORY_URL="https://factory.talos.dev/image/${TALOS_SCHEMATIC_ID}/${FACTORY_VERSION}/metal-${arch}.qcow2"
+  
+  echo "Fetching qcow2 info from Talos factory: ${TALOS_FACTORY_URL}"
+  
+  # Get size from HEAD request (no download needed)
+  echo "Getting file size from headers..."
+  DISK_SIZE=$(curl -s -I -L -f "${TALOS_FACTORY_URL}" | grep -i "content-length" | awk '{print $2}' | tr -d '\r\n')
+  if [ -z "${DISK_SIZE}" ]; then
+    echo "Error: Failed to get file size from Talos factory"
+    exit 1
+  fi
+  echo "  Size: ${DISK_SIZE} bytes"
+  
+  # Download and calculate hash in one pass (stream to sha256sum)
+  echo "Downloading and calculating hash..."
+  TEMP_QCOW2="/tmp/talos-${arch}-${TALOS_VERSION}.qcow2"
+  if ! curl -L -f "${TALOS_FACTORY_URL}" -o "${TEMP_QCOW2}"; then
+    echo "Error: Failed to download qcow2 from Talos factory"
+    exit 1
+  fi
+  
+  DISK_HASH=$(sha256sum "${TEMP_QCOW2}" | cut -d' ' -f1)
+  echo "  Hash: ${DISK_HASH}"
+  
+  # Calculate combined hash (metadata + disk concatenated)
+  cat "${META_FILE}" "${TEMP_QCOW2}" | sha256sum | cut -d' ' -f1 > /tmp/combined_hash
   COMBINED_HASH=$(cat /tmp/combined_hash)
+  
+  # Cleanup temp file
+  rm -f "${TEMP_QCOW2}"
   
   PRODUCT_KEY="product:talos:${TALOS_VERSION}:${arch}:default"
   PRODUCT_KEYS+=("${PRODUCT_KEY}")
@@ -39,6 +73,8 @@ for arch in "${ARCH_ARRAY[@]}"; do
     --arg disk_size "${DISK_SIZE}" \
     --arg date "${CREATION_DATE}" \
     --arg github_repo "talos-incus" \
+    --arg talos_factory_url "${TALOS_FACTORY_URL}" \
+    --arg talos_schematic_id "${TALOS_SCHEMATIC_ID}" \
     '{
       meta_hash: $meta_hash,
       meta_size: ($meta_size | tonumber),
@@ -46,7 +82,9 @@ for arch in "${ARCH_ARRAY[@]}"; do
       disk_size: ($disk_size | tonumber),
       combined_hash: $combined_hash,
       creation_date: ($date | tonumber),
-      github_repo: $github_repo
+      github_repo: $github_repo,
+      talos_factory_url: $talos_factory_url,
+      talos_schematic_id: $talos_schematic_id
     }')
   
   curl -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/${PRODUCT_KEY}" \

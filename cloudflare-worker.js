@@ -229,13 +229,15 @@ async function handleImages(env) {
 /**
  * Handles simplestreams image download requests.
  * 
- * Proxies requests to GitHub Releases and adds required Incus headers:
+ * Proxies requests to appropriate sources and adds required Incus headers:
+ * - Metadata files (incus.tar.xz): GitHub Releases
+ * - Disk files (disk.qcow2): Talos image factory (https://factory.talos.dev)
  * - Incus-Image-Hash: SHA256 hash of the image file
  * - Incus-Image-URL: URL where the image is being served from
  * 
  * Path format: /images/{product}/{version}/{arch}/{variant}/{versionKey}/{filename}
  * Example: /images/talos/v1.12.0/amd64/default/20251226_04:25/incus.tar.xz
- *          /images/alpine/v3.19/amd64/default/20251226_04:25/incus.tar.xz (future)
+ *          /images/talos/v1.12.0/amd64/default/20251226_04:25/disk.qcow2
  * 
  * @param {Request} request - The incoming HTTP request
  * @param {Object} env - Cloudflare Worker environment with IMAGE_HASHES KV binding
@@ -295,26 +297,31 @@ async function handleImageDownload(request, env) {
   
   // Determine which file is being requested and get appropriate hash
   let hash;
-  let githubFilename;
-  
-  // Get GitHub org from config (can be overridden via env vars)
-  const githubOrg = env.GITHUB_ORG || CONFIG.GITHUB_ORG;
-  
-  // GitHub repo name - defaults to product name, can be overridden per-product via metadata.github_repo in KV
-  // Examples:
-  //   - If metadata.github_repo is set: use that (e.g., 'talos-incus', 'my-custom-repo')
-  //   - Otherwise: use product name directly (e.g., 'talos' -> 'talos')
-  const githubRepo = metadata.github_repo || product;
-  const filenamePrefix = metadata.filename_prefix || product;
+  let sourceUrl;
   
   if (filename === 'incus.tar.xz' || filename === 'lxd.tar.xz') {
-    // Metadata file
+    // Metadata file - still served from GitHub releases
     hash = metadata.meta_hash;
-    githubFilename = `${filenamePrefix}-${normalizedArch}-incus.tar.xz`;
+    const githubOrg = env.GITHUB_ORG || CONFIG.GITHUB_ORG;
+    const githubRepo = metadata.github_repo || product;
+    const filenamePrefix = metadata.filename_prefix || product;
+    const githubFilename = `${filenamePrefix}-${normalizedArch}-incus.tar.xz`;
+    sourceUrl = `https://github.com/${githubOrg}/${githubRepo}/releases/download/${version}/${githubFilename}`;
   } else if (filename === 'disk.qcow2' || filename === 'disk-kvm.img') {
-    // Disk file
+    // Disk file - proxy to Talos image factory
     hash = metadata.disk_hash;
-    githubFilename = `${filenamePrefix}-${normalizedArch}.qcow2`;
+    // Use Talos factory URL from metadata, or construct default pattern
+    // Default pattern: https://factory.talos.dev/image/{schematic_id}/{version}/metal-{arch}.qcow2
+    // Default schematic ID for vanilla Talos: 376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba
+    if (metadata.talos_factory_url) {
+      sourceUrl = metadata.talos_factory_url;
+    } else {
+      // Default Talos image factory URL pattern
+      const schematicId = metadata.talos_schematic_id || '376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba';
+      // Version can be with or without 'v' prefix
+      const factoryVersion = version.startsWith('v') ? version : `v${version}`;
+      sourceUrl = `https://factory.talos.dev/image/${schematicId}/${factoryVersion}/metal-${normalizedArch}.qcow2`;
+    }
   } else {
     return new Response(`Unknown file: ${filename}. Expected incus.tar.xz, lxd.tar.xz, or disk.qcow2`, { 
       status: 400,
@@ -322,16 +329,13 @@ async function handleImageDownload(request, env) {
     });
   }
   
-  // GitHub releases URL (source of truth)
-  // Uses configured GitHub org and repo (derived from product or metadata override)
-  const githubUrl = `https://github.com/${githubOrg}/${githubRepo}/releases/download/${version}/${githubFilename}`;
   const proxyUrl = `${new URL(request.url).protocol}//${new URL(request.url).host}${new URL(request.url).pathname}`;
   
   try {
-    const response = await fetch(githubUrl);
+    const response = await fetch(sourceUrl);
     
     if (!response.ok) {
-      return new Response(`GitHub error: ${response.status}`, { 
+      return new Response(`Upstream error: ${response.status}`, { 
         status: response.status,
         headers: { 'Content-Type': 'text/plain' }
       });
