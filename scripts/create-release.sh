@@ -9,19 +9,20 @@ ARCH_LIST=""
 
 IFS=',' read -ra ARCH_ARRAY <<< "${ARCHES}"
 for arch in "${ARCH_ARRAY[@]}"; do
+  # Only include metadata files (qcow2 images are proxied from Talos factory)
   RELEASE_FILES+=("talos-${arch}-incus.tar.xz")
-  RELEASE_FILES+=("talos-${arch}.qcow2")
   RELEASE_FILES+=("talos-${arch}-incus.tar.xz.bundle")
-  RELEASE_FILES+=("talos-${arch}.qcow2.bundle")
   ARCH_LIST="${ARCH_LIST}- ${arch}"$'\n'
 done
 
-NOTES="Automated release of Talos OS split-format images for Incus.
+NOTES="Automated release of Talos OS metadata for Incus.
 
 **Version:** ${TALOS_VERSION}
 
 **Architectures:**
 ${ARCH_LIST}
+
+**Note:** qcow2 disk images are now proxied from Talos image factory (https://factory.talos.dev).
 
 **Usage (Simplestreams - Recommended):**
 
@@ -33,19 +34,13 @@ incus launch windsor:talos/${TALOS_VERSION}/amd64 my-instance
 
 **Verification:**
 
-Verify metadata and disk files:
+Verify metadata files:
 \`\`\`bash
 cosign verify-blob \
   --bundle talos-amd64-incus.tar.xz.bundle \
   --certificate-identity-regexp '^https://github.com/windsorcli/talos-incus' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
   talos-amd64-incus.tar.xz
-
-cosign verify-blob \
-  --bundle talos-amd64.qcow2.bundle \
-  --certificate-identity-regexp '^https://github.com/windsorcli/talos-incus' \
-  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  talos-amd64.qcow2
 \`\`\`"
 
 gh release create "${TALOS_VERSION}" \

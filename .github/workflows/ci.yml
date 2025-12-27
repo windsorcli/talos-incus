@@ -30,73 +30,39 @@ jobs:
       - name: Set up build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y zstd qemu-utils tar xz-utils curl jq
+          sudo apt-get install -y tar xz-utils curl jq
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
 
-      - name: Download and verify upstream bundle
+      - name: Build metadata tarball
         run: |
-          BASE_URL="https://github.com/siderolabs/talos/releases/download/${TALOS_VERSION}"
-          WORK_DIR="build-${{ matrix.arch }}"
-          mkdir -p "${WORK_DIR}"
-          
-          RAW_FILE="${WORK_DIR}/metal-${{ matrix.arch }}.raw.zst"
-          BUNDLE_FILE="${RAW_FILE}.bundle"
-          
-          echo "Downloading raw image and bundle..."
-          curl -L -f "${BASE_URL}/metal-${{ matrix.arch }}.raw.zst" -o "${RAW_FILE}"
-          curl -L -f "${BASE_URL}/metal-${{ matrix.arch }}.raw.zst.bundle" -o "${BUNDLE_FILE}"
-          
-          echo "Verifying bundle signature..."
-          cosign verify-blob \
-            --bundle "${BUNDLE_FILE}" \
-            --certificate-identity-regexp '^https://github.com/siderolabs/talos' \
-            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-            "${RAW_FILE}"
-          echo "✓ Bundle signature verified"
-
-      - name: Build split-format image
-        run: |
-          ./scripts/build-image.sh "${TALOS_VERSION}" "${{ matrix.arch }}"
+          ./scripts/create-metadata.sh "${TALOS_VERSION}" "${{ matrix.arch }}"
 
       - name: Verify artifacts
         run: |
           META_FILE="talos-${{ matrix.arch }}-incus.tar.xz"
-          DISK_FILE="talos-${{ matrix.arch }}.qcow2"
-          for file in "${META_FILE}" "${DISK_FILE}"; do
-            if [ ! -f "$file" ]; then
-              echo "Error: $file not found"
-              exit 1
-            fi
-          done
-          echo "✓ Artifacts verified:"
-          ls -lh "${META_FILE}" "${DISK_FILE}"
+          if [ ! -f "${META_FILE}" ]; then
+            echo "Error: ${META_FILE} not found"
+            exit 1
+          fi
+          echo "✓ Artifact verified:"
+          ls -lh "${META_FILE}"
 
-      - name: Calculate SHA256 hashes and sizes
+      - name: Calculate SHA256 hash and size
         id: hashes
         run: |
           META_FILE="talos-${{ matrix.arch }}-incus.tar.xz"
-          DISK_FILE="talos-${{ matrix.arch }}.qcow2"
           
           META_HASH=$(sha256sum "${META_FILE}" | cut -d' ' -f1)
-          DISK_HASH=$(sha256sum "${DISK_FILE}" | cut -d' ' -f1)
           META_SIZE=$(stat -c%s "${META_FILE}")
-          DISK_SIZE=$(stat -c%s "${DISK_FILE}")
-          
-          cat "${META_FILE}" "${DISK_FILE}" | sha256sum | cut -d' ' -f1 > /tmp/combined_hash
-          COMBINED_HASH=$(cat /tmp/combined_hash)
           
           CREATION_DATE=$(date +%s)
           
           echo "meta_hash=${META_HASH}" >> $GITHUB_OUTPUT
-          echo "disk_hash=${DISK_HASH}" >> $GITHUB_OUTPUT
-          echo "combined_hash=${COMBINED_HASH}" >> $GITHUB_OUTPUT
           echo "meta_size=${META_SIZE}" >> $GITHUB_OUTPUT
-          echo "disk_size=${DISK_SIZE}" >> $GITHUB_OUTPUT
           echo "creation_date=${CREATION_DATE}" >> $GITHUB_OUTPUT
           echo "meta_file=${META_FILE}" >> $GITHUB_OUTPUT
-          echo "disk_file=${DISK_FILE}" >> $GITHUB_OUTPUT
 
       - name: Upload artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -104,7 +70,6 @@ jobs:
           name: talos-${{ matrix.arch }}
           path: |
             talos-${{ matrix.arch }}-incus.tar.xz
-            talos-${{ matrix.arch }}.qcow2
           retention-days: 1
 
   release:

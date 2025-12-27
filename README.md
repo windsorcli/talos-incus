@@ -1,19 +1,21 @@
 # Talos OS Images for Incus
 
-This repository automatically converts [Talos OS](https://www.talos.dev/) disk images into Incus-compatible virtual machine images. Talos is a minimal, immutable Linux distribution designed for Kubernetes, but its official releases don't include Incus/LXD-compatible formats.
+This repository provides a simplestreams server that makes [Talos OS](https://www.talos.dev/) images available for Incus. Talos is a minimal, immutable Linux distribution designed for Kubernetes, but its official releases don't include Incus/LXD-compatible simplestreams formats.
 
-> **⚠️ Caution: Not an Authoritative Source**
+> **ℹ️ About This Service**
 >
-> This image source is a community-driven project and is **not maintained or endorsed by SideroLabs or the Talos OS team**. Although we strive to provide accurate and timely images, **they are provided on a "best effort" basis and are not guaranteed for production use**.
+> **Disk Images:** qcow2 disk images are proxied directly from the [official Talos image factory](https://factory.talos.dev), ensuring you receive authentic, unmodified Talos images.
 >
-> **Do NOT use these images in critical or production environments.** They are intended only for development, testing, or personal experimentation until an official simplestreams (or LXD/Incus) image source is made available by Talos OS or Incus.
+> **Metadata Layer:** The Incus metadata (simplestreams format) is community-provided and maintained by this project. This repository is not officially maintained or endorsed by SideroLabs or the Talos OS team.
 >
-> If and when an officially supported source for Incus images becomes available, you should migrate to that.
+> As a community project, this service is provided on a "best effort" basis. Metadata files are signed with cosign for verification.
+>
+> If and when an officially supported simplestreams source for Incus images becomes available, you should consider migrating to that.
 >
 ---
 ## What This Repository Does
 
-This repository sets up a simplestreams server that distributes Talos OS images for Incus. It automatically converts Talos releases into Incus-compatible VM images, signs them with cosign, and serves them via a Cloudflare Worker at `images.windsorcli.dev`.
+This repository sets up a simplestreams server that distributes Talos OS images for Incus. It creates Incus-compatible metadata, proxies qcow2 disk images from the official Talos image factory, signs metadata with cosign, and serves everything via a Cloudflare Worker at `images.windsorcli.dev`.
 
 > **Missing a version you need?**
 >
@@ -52,25 +54,28 @@ resource "incus_instance" "talos_controller" {
 
 ## How It Works
 
-This repository automatically builds Incus images directly from [Talos OS releases](https://github.com/siderolabs/talos). When a new Talos version is released, Renovate automatically updates the version and triggers a build that:
+This repository automatically creates Incus metadata for Talos OS images. When a new Talos version is released, Renovate automatically updates the version and triggers a build that:
 
-- Downloads the official Talos disk images from `siderolabs/talos`
-- Converts them to split-format Incus images (metadata + disk files)
-- Signs all files with cosign (OIDC keyless)
-- Releases them here
+- Creates Incus-compatible metadata tarballs
+- Fetches qcow2 disk images from [Talos image factory](https://factory.talos.dev)
+- Signs metadata files with cosign
+- Stores metadata in Cloudflare KV for simplestreams serving
 
 ### Cloudflare Worker Proxy
 
-Incus requires specific HTTP headers (`Incus-Image-Hash`, `Incus-Image-URL`) when importing images from URLs. Since GitHub Releases doesn't provide these headers, we use a Cloudflare Worker at `images.windsorcli.dev` that:
+Incus requires specific HTTP headers (`Incus-Image-Hash`, `Incus-Image-URL`) when importing images from URLs. We use a Cloudflare Worker at `images.windsorcli.dev` that:
 
-- Proxies requests to GitHub Releases
-- Looks up pre-calculated SHA256 hashes
+- Proxies metadata requests to GitHub Releases
+- Proxies qcow2 disk requests to Talos image factory (https://factory.talos.dev)
+- Looks up pre-calculated SHA256 hashes from KV
 - Adds the required Incus headers
 - Enables direct URL imports without manual downloads
 
 ## Signing
 
-Releases are signed with [cosign](https://github.com/sigstore/cosign) using OIDC keyless signing. Signatures are created using the GitHub Actions workflow identity and stored in bundle format.
+Metadata files are signed with [cosign](https://github.com/sigstore/cosign) using OIDC keyless signing. Signatures are created using the GitHub Actions workflow identity and stored in bundle format.
+
+**Note:** qcow2 disk images are proxied from Talos image factory and are not signed by this repository.
 
 **Verify Signatures:**
 
@@ -85,7 +90,7 @@ Releases are signed with [cosign](https://github.com/sigstore/cosign) using OIDC
    sudo mv cosign /usr/local/bin/
    ```
 
-2. Download the artifact and bundle file from the release
+2. Download the metadata artifact and bundle file from the release
 
 3. Verify metadata files:
    ```bash
@@ -100,19 +105,4 @@ Releases are signed with [cosign](https://github.com/sigstore/cosign) using OIDC
      --certificate-identity-regexp '^https://github.com/windsorcli/talos-incus' \
      --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
      talos-arm64-incus.tar.xz
-   ```
-
-4. Verify disk files:
-   ```bash
-   cosign verify-blob \
-     --bundle talos-amd64.qcow2.bundle \
-     --certificate-identity-regexp '^https://github.com/windsorcli/talos-incus' \
-     --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-     talos-amd64.qcow2
-   
-   cosign verify-blob \
-     --bundle talos-arm64.qcow2.bundle \
-     --certificate-identity-regexp '^https://github.com/windsorcli/talos-incus' \
-     --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-     talos-arm64.qcow2
    ```
