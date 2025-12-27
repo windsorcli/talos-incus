@@ -15,6 +15,10 @@ This repository automatically converts [Talos OS](https://www.talos.dev/) disk i
 
 This repository sets up a simplestreams server that distributes Talos OS images for Incus. It automatically converts Talos releases into Incus-compatible VM images, signs them with cosign, and serves them via a Cloudflare Worker at `images.windsorcli.dev`.
 
+> **Missing a version you need?**
+>
+> If there is a Talos OS version you want, but it isn't available through this repository or `images.windsorcli.dev`, please [file an issue](https://github.com/windsorcli/talos-incus/issues). Missing image versions can be built and published quickly upon request.
+
 ## Usage
 
 ```bash
