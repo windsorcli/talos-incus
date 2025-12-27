@@ -32,6 +32,28 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y zstd qemu-utils tar xz-utils curl gnupg jq
 
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
+
+      - name: Download and verify upstream bundle
+        run: |
+          BASE_URL="https://github.com/siderolabs/talos/releases/download/${TALOS_VERSION}"
+          WORK_DIR="build-${{ matrix.arch }}"
+          mkdir -p "${WORK_DIR}"
+          
+          RAW_FILE="${WORK_DIR}/metal-${{ matrix.arch }}.raw.zst"
+          BUNDLE_FILE="${RAW_FILE}.bundle"
+          
+          echo "Downloading raw image and bundle..."
+          curl -L -f "${BASE_URL}/metal-${{ matrix.arch }}.raw.zst" -o "${RAW_FILE}"
+          curl -L -f "${BASE_URL}/metal-${{ matrix.arch }}.raw.zst.bundle" -o "${BUNDLE_FILE}"
+          
+          echo "Verifying bundle signature..."
+          cosign verify-blob \
+            --bundle "${BUNDLE_FILE}" \
+            "${RAW_FILE}"
+          echo "✓ Bundle signature verified"
+
       - name: Build split-format image
         run: |
           ./scripts/build-image.sh "${TALOS_VERSION}" "${{ matrix.arch }}"

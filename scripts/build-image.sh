@@ -21,9 +21,13 @@ cd "${WORK_DIR}"
 echo "Step 1: Downloading checksums..."
 curl -L -f "${BASE_URL}/sha256sum.txt" -o "${WORK_DIR}/sha256sum.txt"
 
-# Step 2: Download image
+# Step 2: Download image (if not already present)
 echo "Step 2: Downloading ${RAW_FILE}..."
-curl -L -f "${BASE_URL}/metal-${ARCH}.raw.zst" -o "${RAW_FILE}"
+if [ -f "${RAW_FILE}" ]; then
+  echo "  File already exists, skipping download"
+else
+  curl -L -f "${BASE_URL}/metal-${ARCH}.raw.zst" -o "${RAW_FILE}"
+fi
 
 # Step 3: Verify checksum
 echo "Step 3: Verifying checksum..."
