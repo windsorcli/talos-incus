@@ -57,7 +57,7 @@ for arch in "${ARCH_ARRAY[@]}"; do
   echo "✓ Uploaded metadata for ${PRODUCT_KEY}"
 done
 
-# Update products list
+# Update products list (idempotent merge)
 set +e
 PRODUCTS_RESPONSE=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/products:list" \
   -H "Authorization: Bearer ${API_TOKEN}" \
@@ -66,19 +66,44 @@ set -e
 
 EXISTING_PRODUCTS="[]"
 if [ -n "${PRODUCTS_RESPONSE}" ] && echo "${PRODUCTS_RESPONSE}" | jq -e '.success == true' >/dev/null 2>&1; then
-  RESULT_VALUE=$(echo "${PRODUCTS_RESPONSE}" | jq -r '.result // "[]"' 2>/dev/null || echo "[]")
-  if [ "${RESULT_VALUE}" != "null" ] && [ -n "${RESULT_VALUE}" ]; then
-    EXISTING_PRODUCTS="${RESULT_VALUE}"
+  # Cloudflare KV API returns the value in .result field
+  # The value is stored as a JSON string, so we need to extract and parse it
+  RESULT_VALUE=$(echo "${PRODUCTS_RESPONSE}" | jq -r '.result // empty' 2>/dev/null || echo "")
+  if [ -n "${RESULT_VALUE}" ] && [ "${RESULT_VALUE}" != "null" ]; then
+    # Try to parse as JSON - if it fails, the value might be a JSON string that needs parsing
+    if echo "${RESULT_VALUE}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+      EXISTING_PRODUCTS="${RESULT_VALUE}"
+    elif echo "${RESULT_VALUE}" | jq -e 'type == "string"' >/dev/null 2>&1; then
+      # If it's a JSON string, parse it
+      PARSED=$(echo "${RESULT_VALUE}" | jq -r 'fromjson?' 2>/dev/null || echo "[]")
+      if echo "${PARSED}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        EXISTING_PRODUCTS="${PARSED}"
+      fi
+    fi
   fi
 fi
 
-# Build jq filter to add all product keys
-JQ_FILTER='.'
-for key in "${PRODUCT_KEYS[@]}"; do
-  JQ_FILTER="${JQ_FILTER} | if index(\"${key}\") == null then . + [\"${key}\"] else . end"
-done
+# Ensure we have a valid JSON array
+if ! echo "${EXISTING_PRODUCTS}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+  echo "Warning: Existing products list is invalid, starting with empty array"
+  EXISTING_PRODUCTS="[]"
+fi
 
-UPDATED_PRODUCTS=$(echo "${EXISTING_PRODUCTS}" | jq -r "${JQ_FILTER}" 2>/dev/null || echo "${EXISTING_PRODUCTS}")
+# Merge new product keys idempotently (only add if not already present)
+# Convert PRODUCT_KEYS array to JSON array for jq processing
+NEW_KEYS_JSON=$(printf '%s\n' "${PRODUCT_KEYS[@]}" | jq -R . | jq -s .)
+
+UPDATED_PRODUCTS=$(echo "${EXISTING_PRODUCTS}" | jq -r --argjson new_keys "${NEW_KEYS_JSON}" '
+  . as $existing |
+  $new_keys as $new |
+  ($existing + $new) | unique
+' 2>/dev/null)
+
+# Validate the result
+if ! echo "${UPDATED_PRODUCTS}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+  echo "Error: Failed to merge products list"
+  exit 1
+fi
 
 curl -s -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${NAMESPACE_ID}/values/products:list" \
   -H "Authorization: Bearer ${API_TOKEN}" \
