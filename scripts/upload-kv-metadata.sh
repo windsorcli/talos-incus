@@ -65,22 +65,37 @@ PRODUCTS_RESPONSE=$(curl -s -X GET "https://api.cloudflare.com/client/v4/account
 set -e
 
 EXISTING_PRODUCTS="[]"
-if [ -n "${PRODUCTS_RESPONSE}" ] && echo "${PRODUCTS_RESPONSE}" | jq -e '.success == true' >/dev/null 2>&1; then
-  # Cloudflare KV API returns the value in .result field as a JSON-encoded string
-  # Example: {"success": true, "result": "[\"product:talos:v1.11.6:amd64:default\"]"}
-  RESULT_VALUE=$(echo "${PRODUCTS_RESPONSE}" | jq -r '.result // empty' 2>/dev/null || echo "")
-  if [ -n "${RESULT_VALUE}" ] && [ "${RESULT_VALUE}" != "null" ]; then
-    # Try to parse the result. It is usually a JSON string (array encoded as string), but might be an actual array.
-    if echo "${RESULT_VALUE}" | jq -e 'type == "array"' >/dev/null 2>&1; then
-      EXISTING_PRODUCTS="${RESULT_VALUE}"
-    elif echo "${RESULT_VALUE}" | jq -e 'type == "string"' >/dev/null 2>&1; then
-      PARSED=$(echo "${RESULT_VALUE}" | jq -r 'fromjson?' 2>/dev/null || echo "[]")
+if [ -n "${PRODUCTS_RESPONSE}" ]; then
+  # Cloudflare KV API GET can return the value in two formats:
+  # 1. Direct value in response body (if key exists): "[\"product:talos:v1.11.6:amd64:default\"]"
+  # 2. Wrapped in API v4 format: {"success": true, "result": "[\"product:talos:v1.11.6:amd64:default\"]"}
+  # 3. Error response: {"success": false, "errors": [...]}
+  
+  # Check if it's the wrapped API v4 format
+  if echo "${PRODUCTS_RESPONSE}" | jq -e '.success == true' >/dev/null 2>&1; then
+    # Extract from .result field and parse JSON string
+    RESULT_VALUE=$(echo "${PRODUCTS_RESPONSE}" | jq -r '.result // empty' 2>/dev/null || echo "")
+    if [ -n "${RESULT_VALUE}" ] && [ "${RESULT_VALUE}" != "null" ]; then
+      # Parse the JSON string to get the actual array
+      PARSED=$(echo "${RESULT_VALUE}" | jq -e '.' 2>/dev/null || echo "[]")
       if echo "${PARSED}" | jq -e 'type == "array"' >/dev/null 2>&1; then
         EXISTING_PRODUCTS="${PARSED}"
       fi
     fi
+  # Check if it's a direct JSON array (response body is the value itself)
+  elif echo "${PRODUCTS_RESPONSE}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    EXISTING_PRODUCTS="${PRODUCTS_RESPONSE}"
+  # Check if it's a JSON string that needs parsing
+  elif echo "${PRODUCTS_RESPONSE}" | jq -e 'type == "string"' >/dev/null 2>&1; then
+    STRING_VALUE=$(echo "${PRODUCTS_RESPONSE}" | jq -r '.')
+    PARSED=$(echo "${STRING_VALUE}" | jq -e '.' 2>/dev/null || echo "[]")
+    if echo "${PARSED}" | jq -e 'type == "array"' >/dev/null 2>&1; then
+      EXISTING_PRODUCTS="${PARSED}"
+    fi
   fi
 fi
+
+echo "Debug: Found $(echo "${EXISTING_PRODUCTS}" | jq 'length') existing products"
 
 # Ensure we have a valid JSON array
 if ! echo "${EXISTING_PRODUCTS}" | jq -e 'type == "array"' >/dev/null 2>&1; then
