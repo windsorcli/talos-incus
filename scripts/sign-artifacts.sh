@@ -7,15 +7,15 @@ echo "Signing artifacts with cosign (OIDC keyless)"
 
 IFS=',' read -ra ARCH_ARRAY <<< "${ARCHES}"
 for arch in "${ARCH_ARRAY[@]}"; do
-  # Only sign metadata files (qcow2 images are proxied from Talos factory)
-  file="talos-${arch}-incus.tar.xz"
-  if [ -f "$file" ]; then
-    echo "Signing ${file}..."
-    cosign sign-blob \
-      --yes \
-      --bundle "${file}.bundle" \
-      "${file}"
-  fi
+  for file in "talos-${arch}-incus.tar.xz" "talos-${arch}.qcow2"; do
+    if [ -f "$file" ]; then
+      echo "Signing ${file}..."
+      cosign sign-blob \
+        --yes \
+        --bundle "${file}.bundle" \
+        "${file}"
+    fi
+  done
 done
 
 echo "✓ Signatures created:"
