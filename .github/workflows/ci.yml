@@ -99,7 +99,7 @@ jobs:
           echo "disk_file=${DISK_FILE}" >> $GITHUB_OUTPUT
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: talos-${{ matrix.arch }}
           path: |
@@ -140,7 +140,7 @@ jobs:
 
       - name: Download artifacts
         if: steps.check_release.outputs.exists == 'false'
-        uses: actions/download-artifact@c850b930e6ba138125429b7e5c93fc707a7f8427 # v4.1.8
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           pattern: talos-*
           merge-multiple: true
