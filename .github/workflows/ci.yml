@@ -22,7 +22,7 @@ jobs:
           - arch: amd64
           - arch: arm64
     env:
-      TALOS_VERSION: ${{ github.event.inputs.version || 'v1.12.2' }} # renovate: datasource=github-tags depName=siderolabs/talos
+      TALOS_VERSION: ${{ github.event.inputs.version || 'v1.12.3' }} # renovate: datasource=github-tags depName=siderolabs/talos
     steps:
       - name: Checkout repository
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -118,7 +118,7 @@ jobs:
       contents: write
       id-token: write
     env:
-      TALOS_VERSION: ${{ github.event.inputs.version || 'v1.12.2' }} # renovate: datasource=github-tags depName=siderolabs/talos
+      TALOS_VERSION: ${{ github.event.inputs.version || 'v1.12.3' }} # renovate: datasource=github-tags depName=siderolabs/talos
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout repository
