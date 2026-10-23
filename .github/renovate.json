@@ -10,7 +10,6 @@
       "matchManagers": [
         "github-actions"
       ],
-      "versioning": "github-tags",
       "pinDigests": true,
       "enabled": true,
       "automerge": false,
