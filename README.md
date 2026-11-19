@@ -28,6 +28,28 @@ incus image list windsor:
 incus launch windsor:talos/v1.12.0/amd64 my-instance
 ```
 
+### Variants
+
+Releases from v1.14.6 on have two variants, each for amd64 and arm64.
+
+| Variant | Talos platform | Aliases | Source disk |
+|---------|----------------|---------|-------------|
+| `default` | `metal` | `talos/<version>/<arch>`, `talos/<version>`, `talos/<version>/<arch>/default` | `metal-<arch>.raw.zst` from the [Talos release](https://github.com/siderolabs/talos/releases) |
+| `nocloud` | `nocloud` | `talos/<version>/<arch>/nocloud`, `talos/<version>/nocloud` | `nocloud-<arch>.raw.zst` from [Image Factory](https://factory.talos.dev), default schematic |
+
+Use `nocloud` when the VM gets its network or machine config from a cloud-init `cidata` disk. Incus builds that disk from the instance's `cloud-init.network-config` and `cloud-init.user-data` keys and attaches it through a `cloud-init:config` disk device:
+
+```bash
+incus init windsor:talos/v1.14.6/amd64/nocloud my-node --vm \
+  --config cloud-init.network-config="$(cat network-config.yaml)"
+incus config device add my-node config disk source=cloud-init:config
+incus start my-node
+```
+
+Talos `metal` ignores `cidata`. With no `cidata` disk, `nocloud` boots like `metal`: it runs DHCP on every physical link and waits in maintenance mode for a machine config. The `nocloud` platform sets `net.ifnames=0`, so interfaces are named `eth0`, `eth1`, and so on.
+
+The `nocloud` disk comes from Image Factory with the default schematic, `376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba` (no extensions). Image Factory publishes no cosign signature for it, so CI checks only the `metal` download against an upstream signature. This repository signs the converted files of both variants.
+
 If you are using the Incus Terraform provider, you can add remotes in the `provider` block:
 
 ```
@@ -54,7 +76,7 @@ resource "incus_instance" "talos_controller" {
 
 This repository automatically builds Incus images directly from [Talos OS releases](https://github.com/siderolabs/talos). When a new Talos version is released, Renovate automatically updates the version and triggers a build that:
 
-- Downloads the official Talos disk images from `siderolabs/talos`
+- Downloads the Talos `metal` disk from `siderolabs/talos` and the `nocloud` disk from Image Factory
 - Converts them to split-format Incus images (metadata + disk files)
 - Signs all files with cosign (OIDC keyless)
 - Releases them here
@@ -85,7 +107,7 @@ Releases are signed with [cosign](https://github.com/sigstore/cosign) using OIDC
    sudo mv cosign /usr/local/bin/
    ```
 
-2. Download the artifact and bundle file from the release
+2. Download the artifact and bundle file from the release. The commands below use the `default` variant. For `nocloud`, replace `talos-<arch>` with `talos-nocloud-<arch>` in each file name.
 
 3. Verify metadata files:
    ```bash
