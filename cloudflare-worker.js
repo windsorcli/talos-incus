@@ -48,6 +48,28 @@ async function getAllProducts(env) {
 }
 
 /**
+ * Builds the comma-separated simplestreams aliases for a product.
+ *
+ * Only the default variant gets the short aliases ({os}/{version}/{arch} and
+ * {os}/{version}). Every other variant gets {os}/{version}/{arch}/{variant} and
+ * {os}/{version}/{variant}, so adding a variant never changes the image that an
+ * existing short alias resolves to.
+ *
+ * @param {string} os - Product name, for example 'talos'
+ * @param {string} version - Release, for example 'v1.12.0'
+ * @param {string} arch - Architecture, for example 'amd64'
+ * @param {string} variant - Variant, for example 'default' or 'nocloud'
+ * @returns {string} Comma-separated aliases
+ */
+function productAliases(os, version, arch, variant) {
+  const full = `${os}/${version}/${arch}/${variant}`;
+  if (variant === 'default') {
+    return `${full},${os}/${version}/${arch},${os}/${version}`;
+  }
+  return `${full},${os}/${version}/${variant}`;
+}
+
+/**
  * Retrieves all image metadata from KV and formats it as simplestreams products.
  * 
  * Builds the complete images.json structure with:
@@ -82,7 +104,7 @@ async function getAllImageMetadata(env) {
         
         if (!images[simplestreamsKey]) {
           images[simplestreamsKey] = {
-            aliases: `${os}/${version}/${arch}/${variant},${os}/${version}/${arch},${os}/${version}`,
+            aliases: productAliases(os, version, arch, variant),
             arch: arch,
             os: os.charAt(0).toUpperCase() + os.slice(1),
             release: version,
